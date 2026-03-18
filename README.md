@@ -1,0 +1,440 @@
+# Bot cita previa extranjería — POLICÍA TARJETA CONFLICTO UCRANIA (Madrid)
+
+**Fecha:** 18 de marzo de 2026
+**Estado:** Pendiente de mapeo de IDs de elementos HTML
+
+---
+
+## 1. Contexto
+
+El portal ICP del gobierno español es el único punto de acceso para solicitar cita previa de extranjería. Las citas para el trámite "POLICÍA TARJETA CONFLICTO UCRANIA" en Madrid se liberan de forma esporádica, en cantidad limitada, y desaparecen en segundos. La demanda supera estructuralmente la oferta.
+
+El proceso manual para comprobar si hay cita disponible requiere rellenar 5 formularios secuenciales cada vez. Si no hay cita, el usuario debe repetir todo el proceso desde el principio. Esto obliga a dedicar horas frente al navegador repitiendo un formulario mecánico sin garantía de resultado.
+
+---
+
+## 2. Objetivo
+
+Automatizar el proceso de solicitud de cita previa en el portal ICP para el trámite "POLICÍA TARJETA CONFLICTO UCRANIA" en Madrid.
+
+El bot navega el formulario completo en bucle hasta que detecta disponibilidad de cita. Cuando hay cita disponible, emite una alerta sonora, mantiene la sesión activa en la página, y cede el control al usuario para completar manualmente los pasos finales (selección de hora y confirmación SMS).
+
+---
+
+## 3. Arquitectura
+
+### Enfoque: Chrome DevTools Protocol (CDP) sobre navegador real
+
+El script Python se conecta al navegador Brave del usuario mediante el protocolo CDP, que expone un canal WebSocket en `localhost:9222`.
+
+A través de este canal, el script inyecta sentencias JavaScript directamente en el contexto de la página cargada. Estas sentencias operan sobre el DOM de la página usando los **IDs nativos de los elementos HTML** (inputs, selects, buttons) para:
+
+- **Seleccionar opciones** en dropdowns (`document.getElementById('id').value = 'valor'`)
+- **Rellenar campos de texto** (`document.getElementById('id').value = 'texto'`)
+- **Hacer click en botones** (`document.getElementById('id').click()`)
+- **Leer contenido de la página** para detectar mensajes como "no hay citas disponibles"
+
+### Por qué IDs de elementos HTML como método de interacción
+
+- **Robustez:** Los IDs son identificadores únicos dentro del DOM. A diferencia de XPaths o selectores CSS compuestos, no dependen de la estructura jerárquica de la página ni de clases CSS que pueden cambiar por motivos estéticos.
+- **Simplicidad:** Una línea de JS por acción. No se necesitan frameworks ni librerías de scraping.
+- **Mantenimiento:** Si el portal cambia un ID, el cambio es una edición de una línea en el archivo de configuración. No requiere modificar lógica del script.
+- **Indetectable:** JavaScript ejecutado vía CDP en el contexto de la página es idéntico a JavaScript ejecutado desde la consola del navegador por un humano. No existe flag, header ni fingerprint que lo distinga de una interacción manual.
+
+### Diferencia con Selenium/WebDriver
+
+Selenium instancia un navegador controlado mediante el protocolo WebDriver, que inyecta flags detectables (`navigator.webdriver = true`) y genera un fingerprint artificial. El portal ICP detecta y bloquea este patrón activamente (confirmado por múltiples repositorios y usuarios).
+
+CDP sobre un navegador real no tiene este problema. El navegador es la instalación normal del usuario, con su perfil, cookies e historial. CDP es un canal lateral de comunicación, no una inyección en el navegador.
+
+---
+
+## 4. Requisitos
+
+- Windows 10/11
+- Python 3.10 o superior
+- Brave Browser instalado
+- Librería Python `websockets`:
+
+```
+pip install websockets
+```
+
+Ninguna otra dependencia.
+
+---
+
+## 5. Instalación y puesta en marcha
+
+### 5.1. Localizar la ruta de Brave en Windows
+
+La ruta de `brave.exe` depende de la instalación. Las ubicaciones habituales son:
+
+```
+C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe
+C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe
+C:\Users\TU_USUARIO\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe
+```
+
+Para encontrarla con certeza: abrir una terminal y ejecutar:
+
+```
+where /R "C:\" brave.exe
+```
+
+O buscar "Brave" en el menú de inicio, click derecho → "Abrir ubicación del archivo", y copiar la ruta completa.
+
+### 5.2. Lanzar Brave con CDP habilitado
+
+Cerrar todas las ventanas de Brave antes de ejecutar este comando. Si Brave ya está corriendo, el flag `--remote-debugging-port` se ignora silenciosamente.
+
+```
+"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" --remote-debugging-port=9222
+```
+
+Sustituir la ruta por la correcta de tu instalación.
+
+### 5.3. Verificar que CDP funciona
+
+Antes de ejecutar el script, abrir en el propio Brave (o cualquier navegador):
+
+```
+http://localhost:9222/json
+```
+
+Si CDP está activo, devuelve un JSON con la lista de pestañas abiertas. Ejemplo:
+
+```json
+[{
+  "description": "",
+  "devtoolsFrontendUrl": "...",
+  "id": "ABC123",
+  "title": "New Tab",
+  "type": "page",
+  "url": "chrome://newtab/",
+  "webSocketDebuggerUrl": "ws://localhost:9222/devtools/page/ABC123"
+}]
+```
+
+Si devuelve error de conexión: Brave no se lanzó con el flag, o ya estaba corriendo antes de ejecutar el comando.
+
+### 5.4. Ejecutar el script
+
+```
+python cita_bot.py
+```
+
+El script se conecta a Brave, abre el portal ICP y comienza el bucle de búsqueda de cita.
+
+### 5.5. Parar el script
+
+`Ctrl+C` en la terminal. El script se cierra limpiamente. Brave queda abierto y sin afectar.
+
+---
+
+## 6. Flujo detallado del bot
+
+### PASO 0 — Lanzamiento de Brave (manual, una sola vez)
+
+El usuario abre Brave desde línea de comandos con el flag de depuración remota (ver sección 5.2). Brave se abre normalmente. El flag solo habilita el puerto WebSocket de CDP.
+
+### PASO 1 — Conexión del script Python
+
+El script se conecta al WebSocket de Brave en `localhost:9222`. Si Brave no está abierto o no tiene el flag, el script muestra un error descriptivo y se cierra.
+
+### PASO 2 — Navegación a la URL de inicio
+
+El script navega automáticamente a la URL de inicio del portal ICP.
+Espera a que la página cargue completamente antes de continuar.
+
+> **PENDIENTE:** URL exacta de inicio del portal.
+
+### PASO 3 — Formulario 1: Selección de provincia
+
+Acciones JS ejecutadas por el script:
+
+1. Seleccionar "Madrid" en el dropdown de provincia → `getElementById('ID_DROPDOWN_PROVINCIA').value = 'VALOR_MADRID'`
+2. Disparar evento `change` → `getElementById('ID_DROPDOWN_PROVINCIA').dispatchEvent(new Event('change', { bubbles: true }))`
+3. Click en botón "Aceptar" → `getElementById('ID_BOTON_ACEPTAR_F1').click()`
+4. Esperar carga de la siguiente página
+
+> **PENDIENTE:** ID del dropdown de provincia, valor de la opción "Madrid", ID del botón Aceptar.
+
+### PASO 4 — Formulario 2: Selección de oficina y trámite
+
+Acciones JS ejecutadas por el script:
+
+1. No se toca el dropdown de oficina (se deja la opción por defecto "cualquier oficina")
+2. Seleccionar trámite → `getElementById('ID_DROPDOWN_TRAMITE').value = '4112'`
+3. Disparar evento `change` → `getElementById('ID_DROPDOWN_TRAMITE').dispatchEvent(new Event('change', { bubbles: true }))`
+4. Click en botón "Aceptar" → `getElementById('ID_BOTON_ACEPTAR_F2').click()`
+5. Esperar carga de la siguiente página
+
+> **PENDIENTE:** ID del dropdown de trámite, ID del botón Aceptar.
+
+### PASO 5 — Formulario 3: Aviso informativo
+
+Acciones JS ejecutadas por el script:
+
+1. Click en botón "Aceptar" → `getElementById('ID_BOTON_ACEPTAR_F3').click()`
+2. Esperar carga de la siguiente página
+
+> **PENDIENTE:** ID del botón Aceptar.
+
+### PASO 6 — Formulario 4: Datos personales
+
+Acciones JS ejecutadas por el script:
+
+1. Rellenar campo NIE → `getElementById('ID_INPUT_NIE').value = 'X1234567A'`
+2. Disparar evento `input` → `getElementById('ID_INPUT_NIE').dispatchEvent(new Event('input', { bubbles: true }))`
+3. Rellenar campo Nombre y Apellidos → `getElementById('ID_INPUT_NOMBRE').value = 'NOMBRE APELLIDO1 APELLIDO2'`
+4. Disparar evento `input` → `getElementById('ID_INPUT_NOMBRE').dispatchEvent(new Event('input', { bubbles: true }))`
+5. Click en botón "Aceptar" → `getElementById('ID_BOTON_ACEPTAR_F4').click()`
+6. Esperar carga de la siguiente página
+
+> **PENDIENTE:** ID del input NIE, ID del input Nombre, ID del botón Aceptar.
+
+### PASO 7 — Formulario 5: Solicitar cita
+
+Acciones JS ejecutadas por el script:
+
+1. Click en botón "Solicitar cita" → `getElementById('ID_BOTON_SOLICITAR').click()`
+2. Esperar carga de la respuesta
+
+> **PENDIENTE:** ID del botón "Solicitar cita".
+
+### PASO 8 — Comprobación de disponibilidad
+
+El script busca en el contenido de la página el texto de "no hay citas disponibles".
+
+**Si encuentra el mensaje (no hay cita):**
+
+1. El script espera el intervalo configurado (`intervalo_reintento_segundos`, por defecto 60 segundos)
+2. Hace click en el botón "Aceptar" de esa misma página → `getElementById('ID_BOTON_ACEPTAR_NOCITA').click()`
+3. Este botón devuelve al usuario a la URL de inicio del portal, manteniendo la sesión
+4. El script repite el proceso completo desde el PASO 3
+
+> **PENDIENTE:** ID del botón "Aceptar" en la página de "no hay citas".
+
+**Si NO encuentra el mensaje (hay cita disponible):**
+
+1. El script NO toca nada en la página. La deja exactamente en el estado en que está.
+2. Emite una alerta sonora repetida (bucle de sonido) para que el usuario la oiga aunque no esté delante del PC.
+3. Imprime en consola un mensaje destacado con timestamp.
+4. Entra en un bucle de mantenimiento de sesión: periódicamente (cada 30 segundos) ejecuta una acción mínima en la página (por ejemplo, leer un elemento del DOM) para evitar que la sesión del portal expire por inactividad.
+5. El bucle de mantenimiento + alerta continúa indefinidamente hasta que el usuario toma el control o para el script con Ctrl+C.
+
+El objetivo es que cuando el usuario llegue al navegador, la página esté exactamente donde el script la dejó, con la sesión activa, lista para que el usuario seleccione hora y confirme manualmente.
+
+> **PENDIENTE:** Texto exacto del mensaje "no hay citas disponibles". Verificar si la sesión del portal tiene timeout y cuánto es.
+
+---
+
+## 7. Cadencia entre acciones (anti-bloqueo)
+
+Cada acción del script (seleccionar un valor, rellenar un campo, hacer click en un botón, esperar carga de página) tiene una pausa configurable antes de ejecutarse. Esta pausa simula el tiempo que un humano tardaría entre acciones y evita que el portal detecte un patrón de interacción inhumanamente rápido.
+
+El parámetro `delay_entre_acciones_segundos` en `config.json` controla esta pausa. Por defecto es 1 segundo.
+
+**Comportamiento:**
+
+- Antes de cada interacción con un elemento (seleccionar, rellenar, click), el script espera `delay_entre_acciones_segundos`.
+- La espera se aplica ENTRE acciones dentro de un mismo formulario, no solo entre formularios.
+- La espera entre reintentos completos (cuando no hay citas) es un parámetro separado: `intervalo_reintento_segundos`.
+
+**Ejemplo con delay de 1 segundo:**
+
+```
+[09:15:32.000] Navegando a URL de inicio...
+[09:15:34.000] Página cargada
+[09:15:35.000] (+1s) Seleccionando provincia Madrid
+[09:15:36.000] (+1s) Click en Aceptar F1
+[09:15:38.000] Página cargada
+[09:15:39.000] (+1s) Seleccionando trámite 4112
+[09:15:40.000] (+1s) Click en Aceptar F2
+...
+```
+
+**Recomendaciones de ajuste:**
+
+- `1.0` segundo: valor por defecto, conservador, baja probabilidad de detección
+- `0.5` segundos: más agresivo, aceptable para intentos esporádicos
+- `2.0` segundos o más: muy conservador, usar si se sospecha de detección por cadencia
+
+Un ciclo completo (5 formularios) con delay de 1 segundo tarda aproximadamente 15-20 segundos incluyendo tiempos de carga de página. Con un intervalo de reintento de 60 segundos, el script ejecuta aproximadamente un intento por minuto.
+
+---
+
+## 8. Nota técnica: eventos del DOM al modificar valores
+
+Cuando JavaScript modifica el valor de un `<select>` o un `<input>` mediante `.value = 'x'`, el navegador NO dispara automáticamente los eventos `change` ni `input` del DOM.
+
+Muchos formularios web dependen de estos eventos para:
+
+- Habilitar o deshabilitar campos dependientes
+- Cargar opciones dinámicas (por ejemplo, el dropdown de trámite puede cargarse después de seleccionar provincia)
+- Validar datos antes de permitir el envío
+
+El script debe disparar estos eventos manualmente después de cada modificación de valor:
+
+```javascript
+// Seleccionar valor
+document.getElementById('id_elemento').value = 'valor';
+
+// Disparar evento change para que el formulario reaccione
+document.getElementById('id_elemento').dispatchEvent(new Event('change', { bubbles: true }));
+```
+
+Si un formulario no responde después de establecer un valor, es casi seguro que falta el `dispatchEvent`. Esto debe verificarse empíricamente en cada paso del portal durante la fase de mapeo de IDs.
+
+---
+
+## 9. Salida en consola (logging)
+
+El script imprime en consola un log por cada intento con el siguiente formato:
+
+```
+[2026-03-18 09:15:32] Intento #1 — Navegando a URL de inicio...
+[2026-03-18 09:15:35] Intento #1 — Formulario 1: provincia seleccionada
+[2026-03-18 09:15:38] Intento #1 — Formulario 2: trámite seleccionado
+[2026-03-18 09:15:40] Intento #1 — Formulario 3: aviso aceptado
+[2026-03-18 09:15:43] Intento #1 — Formulario 4: datos personales rellenados
+[2026-03-18 09:15:46] Intento #1 — Formulario 5: cita solicitada
+[2026-03-18 09:15:49] Intento #1 — Resultado: NO HAY CITAS. Reintentando en 60s...
+[2026-03-18 09:16:49] Intento #2 — Navegando a URL de inicio...
+...
+[2026-03-18 11:42:17] Intento #87 — Resultado: *** CITA DISPONIBLE *** — Toma el control del navegador
+```
+
+Sin este log no es posible saber si el script lleva horas fallando en silencio.
+
+---
+
+## 10. Estados inesperados de la página
+
+El flujo principal contempla dos estados después de solicitar cita:
+
+- "No hay citas disponibles" → reintentar
+- Cualquier otra cosa → asumir cita disponible y alertar
+
+En la práctica, la página puede mostrar otros estados:
+
+| Estado | Causa probable | Comportamiento del script |
+|---|---|---|
+| Error del servidor (500, 503) | Portal caído o en mantenimiento | Detectar y reintentar tras espera |
+| Sesión expirada | Demasiado tiempo entre pasos | Detectar y reiniciar desde el PASO 2 |
+| Página en blanco o timeout | Conexión lenta o portal saturado | Timeout configurable; reiniciar desde PASO 2 |
+| CAPTCHA inesperado | Portal añade verificación nueva | Emitir alerta sonora; el usuario resuelve manualmente |
+| Elemento no encontrado | Portal cambió un ID | Log del error con el ID que falló; el script se detiene |
+| Texto inesperado en la página | Cambio en el portal | Log del contenido; emitir alerta; detenerse |
+
+El script debe manejar todos estos casos sin quedarse colgado. Si encuentra un estado que no reconoce, la acción por defecto es: log del estado, alerta sonora, detenerse.
+
+---
+
+## 11. Archivo de configuración (config.json)
+
+```json
+{
+    "url_inicio": "PENDIENTE",
+    "nie": "X1234567A",
+    "nombre": "NOMBRE APELLIDO1 APELLIDO2",
+    "intervalo_reintento_segundos": 60,
+    "delay_entre_acciones_segundos": 1.0,
+    "timeout_carga_pagina_segundos": 15,
+    "ids": {
+        "dropdown_provincia": "PENDIENTE",
+        "valor_madrid": "PENDIENTE",
+        "boton_aceptar_f1": "PENDIENTE",
+        "dropdown_tramite": "PENDIENTE",
+        "valor_tramite": "4112",
+        "boton_aceptar_f2": "PENDIENTE",
+        "boton_aceptar_f3": "PENDIENTE",
+        "input_nie": "PENDIENTE",
+        "input_nombre": "PENDIENTE",
+        "boton_aceptar_f4": "PENDIENTE",
+        "boton_solicitar_cita": "PENDIENTE",
+        "boton_aceptar_nocita": "PENDIENTE",
+        "texto_no_hay_citas": "PENDIENTE"
+    }
+}
+```
+
+Todos los IDs de elementos están externalizados. Si el portal cambia un ID, se edita una línea del JSON sin tocar el código Python.
+
+---
+
+## 12. Riesgos
+
+| Riesgo | Probabilidad | Mitigación |
+|---|---|---|
+| El portal cambia los IDs de los elementos | Media | IDs externalizados en config.json; corrección inmediata |
+| El portal detecta el patrón de navegación repetida (misma IP, mismo flujo) | Baja-media | Cadencia configurable entre acciones y entre reintentos; no hay fingerprint artificial |
+| El portal añade CAPTCHA en algún paso | Baja | El bot se detiene y el usuario resuelve manualmente |
+| Brave cierra o pierde conexión | Baja | El script detecta la desconexión y muestra error |
+| La página tarda más de lo esperado en cargar | Media | Timeouts configurables por paso |
+
+---
+
+## 13. Lo que este bot NO hace
+
+- No resuelve CAPTCHAs
+- No introduce el código SMS (el usuario lo hace manualmente)
+- No selecciona hora de cita (el usuario lo hace manualmente)
+- No corre 24/7 sin supervisión (requiere que el PC esté encendido y Brave abierto)
+- No usa proxies, VPNs ni rotación de IP
+
+---
+
+## 14. Troubleshooting
+
+### "No se puede conectar a localhost:9222"
+
+- Brave no se lanzó con `--remote-debugging-port=9222`
+- Brave ya estaba corriendo antes de ejecutar el comando con el flag. Cerrar todas las ventanas de Brave y volver a lanzar con el flag.
+- Otro programa está usando el puerto 9222. Cambiar a otro puerto (ej: 9223) tanto en el comando de Brave como en el script.
+
+### "Elemento no encontrado: ID_xxx"
+
+- El portal cambió el ID del elemento. Abrir DevTools (F12), inspeccionar el elemento, copiar el nuevo ID y actualizar config.json.
+
+### "La página no avanza después de seleccionar un valor"
+
+- Probablemente falta el dispatchEvent. Ver sección 8 de este documento.
+
+### "El script lleva horas sin encontrar cita"
+
+- Es el comportamiento esperado. Las citas para este trámite en Madrid se liberan esporádicamente.
+- Verificar en el log que el script está completando ciclos (no se ha quedado atascado en un paso).
+- Considerar reducir el intervalo de reintento si es muy conservador (no bajar de 30 segundos).
+
+### "El script se detuvo con un error no reconocido"
+
+- Copiar el log del error. Probablemente es un estado inesperado de la página (ver sección 10).
+- Navegar manualmente al portal y verificar que sigue operativo.
+
+---
+
+## 15. Limitaciones
+
+- El PC debe estar encendido y Brave abierto durante toda la ejecución.
+- El usuario debe estar disponible para tomar el control del navegador cuando suene la alerta (selección de hora + confirmación SMS).
+- El script no resuelve CAPTCHAs ni introduce códigos SMS.
+- No hay rotación de IP. Si la IP es bloqueada, reiniciar el router para obtener una nueva IP (en la mayoría de conexiones domésticas españolas).
+- El script opera en una sola pestaña. No abrir otras pestañas ni interactuar con Brave mientras el script está corriendo.
+
+---
+
+## 16. Próximo paso
+
+Recopilar los IDs de los elementos HTML de cada formulario. El usuario navega el portal con DevTools (F12) abiertas, inspecciona cada elemento interactivo, y proporciona el ID (atributo `id=""` del elemento HTML).
+
+Elementos pendientes por formulario:
+
+- **Formulario 1:** ID dropdown provincia, valor opción Madrid, ID botón Aceptar
+- **Formulario 2:** ID dropdown trámite, ID botón Aceptar
+- **Formulario 3:** ID botón Aceptar
+- **Formulario 4:** ID input NIE, ID input Nombre, ID botón Aceptar
+- **Formulario 5:** ID botón Solicitar cita
+- **Página sin citas:** ID botón Aceptar (el que devuelve al inicio)
+- **General:** URL de inicio, texto exacto del mensaje "no hay citas"
