@@ -14,24 +14,26 @@ Antes de implementar, necesito que el usuario proporcione:
    - Valor de la opción "Madrid": `/icpplustiem/citar?p=28&locale=es`
    - ID del botón "Aceptar": `btnAceptar` (onclick llama a `envia()`)
 
-   **Formulario 2 (oficina y trámite):**
-   - ID del dropdown de trámite
-   - ID del botón "Aceptar"
+   **Formulario 2 (oficina y trámite):** ✅ COMPLETADO
+   - ID del dropdown de trámite: `tramiteGrupo[0]` (onchange llama a `eliminarSeleccionOtrosGrupos(0);cargaMensajesTramite()`)
+   - Valor del trámite: `4112` (POLICÍA TARJETA CONFLICTO UCRANIA)
+   - ID del botón "Aceptar": `btnAceptar` (onclick llama a `envia()`)
 
-   **Formulario 3 (aviso informativo):**
-   - ID del botón "Aceptar"
+   **Formulario 3 (aviso informativo):** ✅ COMPLETADO
+   - ID del botón "Entrar": `btnEntrar` (onclick llama a `document.forms[0].submit()`)
 
-   **Formulario 4 (datos personales):**
-   - ID del input NIE
-   - ID del input Nombre
-   - ID del botón "Aceptar"
+   **Formulario 4 (datos personales):** ✅ COMPLETADO
+   - ID del input NIE: `txtIdCitado` (maxlength 9)
+   - ID del input Nombre: `txtDesCitado` (onchange llama a `comprobarDatos()`)
+   - ID del botón "Aceptar": `btnEnviar` (onclick llama a `envia()`)
 
-   **Formulario 5 (solicitar cita):**
-   - ID del botón "Solicitar cita"
+   **Formulario 5 (solicitar cita):** ✅ COMPLETADO
+   - ID del botón "Solicitar Cita": `btnEnviar` (onclick llama a `enviar('solicitud')`)
 
-   **Página sin citas:**
-   - ID del botón "Aceptar" (el que devuelve al inicio)
-   - Texto exacto del mensaje "no hay citas disponibles" (copiar literal)
+   **Página sin citas:** ✅ COMPLETADO
+   - ID del botón "Salir": `btnSalir` (onclick llama a `goAc_opc_direct()`)
+   - Texto exacto: `En este momento no hay citas disponibles.`
+   - Contenedor: `<div class="mf-main--content ac-custom-content">`
 
 3. **¿La página usa IDs estáticos o dinámicos?** (si cambian cada vez que recargas, hay que usar otro selector)
 

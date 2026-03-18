@@ -1,7 +1,7 @@
 # Bot cita previa extranjería — POLICÍA TARJETA CONFLICTO UCRANIA (Madrid)
 
 **Fecha:** 18 de marzo de 2026
-**Estado:** Pendiente de mapeo de IDs de elementos HTML
+**Estado:** IDs de elementos HTML completados — Pendiente: URL de inicio y datos personales
 
 ---
 
@@ -165,43 +165,43 @@ Acciones JS ejecutadas por el script:
 Acciones JS ejecutadas por el script:
 
 1. No se toca el dropdown de oficina (se deja la opción por defecto "cualquier oficina")
-2. Seleccionar trámite → `getElementById('ID_DROPDOWN_TRAMITE').value = '4112'`
-3. Disparar evento `change` → `getElementById('ID_DROPDOWN_TRAMITE').dispatchEvent(new Event('change', { bubbles: true }))`
-4. Click en botón "Aceptar" → `getElementById('ID_BOTON_ACEPTAR_F2').click()`
+2. Seleccionar trámite → `getElementById('tramiteGrupo[0]').value = '4112'`
+3. Disparar evento `change` → `getElementById('tramiteGrupo[0]').dispatchEvent(new Event('change', { bubbles: true }))`
+4. Click en botón "Aceptar" → `getElementById('btnAceptar').click()`
 5. Esperar carga de la siguiente página
 
-> **PENDIENTE:** ID del dropdown de trámite, ID del botón Aceptar.
+> **Nota:** El dropdown de trámite tiene `onchange` propio que llama a `eliminarSeleccionOtrosGrupos(0)` y `cargaMensajesTramite()`. El `dispatchEvent` los dispara automáticamente.
 
 ### PASO 5 — Formulario 3: Aviso informativo
 
 Acciones JS ejecutadas por el script:
 
-1. Click en botón "Aceptar" → `getElementById('ID_BOTON_ACEPTAR_F3').click()`
+1. Click en botón "Entrar" → `getElementById('btnEntrar').click()`
 2. Esperar carga de la siguiente página
 
-> **PENDIENTE:** ID del botón Aceptar.
+> **Nota:** El botón dice "Entrar" (no "Aceptar") y ejecuta `document.forms[0].submit()` al hacer click.
 
 ### PASO 6 — Formulario 4: Datos personales
 
 Acciones JS ejecutadas por el script:
 
-1. Rellenar campo NIE → `getElementById('ID_INPUT_NIE').value = 'X1234567A'`
-2. Disparar evento `input` → `getElementById('ID_INPUT_NIE').dispatchEvent(new Event('input', { bubbles: true }))`
-3. Rellenar campo Nombre y Apellidos → `getElementById('ID_INPUT_NOMBRE').value = 'NOMBRE APELLIDO1 APELLIDO2'`
-4. Disparar evento `input` → `getElementById('ID_INPUT_NOMBRE').dispatchEvent(new Event('input', { bubbles: true }))`
-5. Click en botón "Aceptar" → `getElementById('ID_BOTON_ACEPTAR_F4').click()`
+1. Rellenar campo NIE → `getElementById('txtIdCitado').value = 'X1234567A'`
+2. Disparar evento `input` → `getElementById('txtIdCitado').dispatchEvent(new Event('input', { bubbles: true }))`
+3. Rellenar campo Nombre y Apellidos → `getElementById('txtDesCitado').value = 'NOMBRE APELLIDO1 APELLIDO2'`
+4. Disparar evento `change` → `getElementById('txtDesCitado').dispatchEvent(new Event('change', { bubbles: true }))`
+5. Click en botón "Aceptar" → `getElementById('btnEnviar').click()`
 6. Esperar carga de la siguiente página
 
-> **PENDIENTE:** ID del input NIE, ID del input Nombre, ID del botón Aceptar.
+> **Nota:** El input Nombre tiene `onchange="comprobarDatos()"`, por lo que se dispara evento `change` (no `input`) para activar la validación.
 
 ### PASO 7 — Formulario 5: Solicitar cita
 
 Acciones JS ejecutadas por el script:
 
-1. Click en botón "Solicitar cita" → `getElementById('ID_BOTON_SOLICITAR').click()`
+1. Click en botón "Solicitar Cita" → `getElementById('btnEnviar').click()`
 2. Esperar carga de la respuesta
 
-> **PENDIENTE:** ID del botón "Solicitar cita".
+> **Nota:** El botón ejecuta `enviar('solicitud')` al hacer click. Se usa `.click()` para dispararlo.
 
 ### PASO 8 — Comprobación de disponibilidad
 
@@ -210,11 +210,11 @@ El script busca en el contenido de la página el texto de "no hay citas disponib
 **Si encuentra el mensaje (no hay cita):**
 
 1. El script espera el intervalo configurado (`intervalo_reintento_segundos`, por defecto 60 segundos)
-2. Hace click en el botón "Aceptar" de esa misma página → `getElementById('ID_BOTON_ACEPTAR_NOCITA').click()`
-3. Este botón devuelve al usuario a la URL de inicio del portal, manteniendo la sesión
+2. Hace click en el botón "Salir" de esa misma página → `getElementById('btnSalir').click()`
+3. Este botón ejecuta `goAc_opc_direct()` y devuelve al usuario a la URL de inicio del portal, manteniendo la sesión
 4. El script repite el proceso completo desde el PASO 3
 
-> **PENDIENTE:** ID del botón "Aceptar" en la página de "no hay citas".
+> **Nota:** El texto exacto de "no hay citas" es: `En este momento no hay citas disponibles.` (dentro de `<p class="mf-msg__info">` en `<div class="mf-main--content ac-custom-content">`).
 
 **Si NO encuentra el mensaje (hay cita disponible):**
 
@@ -226,7 +226,7 @@ El script busca en el contenido de la página el texto de "no hay citas disponib
 
 El objetivo es que cuando el usuario llegue al navegador, la página esté exactamente donde el script la dejó, con la sesión activa, lista para que el usuario seleccione hora y confirme manualmente.
 
-> **PENDIENTE:** Texto exacto del mensaje "no hay citas disponibles". Verificar si la sesión del portal tiene timeout y cuánto es.
+> **Nota:** Verificar si la sesión del portal tiene timeout y cuánto es.
 
 ---
 
@@ -346,16 +346,16 @@ El script debe manejar todos estos casos sin quedarse colgado. Si encuentra un e
         "dropdown_provincia": "form",
         "valor_madrid": "/icpplustiem/citar?p=28&locale=es",
         "boton_aceptar_f1": "btnAceptar",
-        "dropdown_tramite": "PENDIENTE",
+        "dropdown_tramite": "tramiteGrupo[0]",
         "valor_tramite": "4112",
-        "boton_aceptar_f2": "PENDIENTE",
-        "boton_aceptar_f3": "PENDIENTE",
-        "input_nie": "PENDIENTE",
-        "input_nombre": "PENDIENTE",
-        "boton_aceptar_f4": "PENDIENTE",
-        "boton_solicitar_cita": "PENDIENTE",
-        "boton_aceptar_nocita": "PENDIENTE",
-        "texto_no_hay_citas": "PENDIENTE"
+        "boton_aceptar_f2": "btnAceptar",
+        "boton_entrar_f3": "btnEntrar",
+        "input_nie": "txtIdCitado",
+        "input_nombre": "txtDesCitado",
+        "boton_aceptar_f4": "btnEnviar",
+        "boton_solicitar_cita": "btnEnviar",
+        "boton_salir_nocita": "btnSalir",
+        "texto_no_hay_citas": "En este momento no hay citas disponibles."
     }
 }
 ```
@@ -432,9 +432,9 @@ Recopilar los IDs de los elementos HTML de cada formulario. El usuario navega el
 Elementos pendientes por formulario:
 
 - **Formulario 1:** ✅ dropdown `form`, valor Madrid `/icpplustiem/citar?p=28&locale=es`, botón `btnAceptar`
-- **Formulario 2:** ID dropdown trámite, ID botón Aceptar
-- **Formulario 3:** ID botón Aceptar
-- **Formulario 4:** ID input NIE, ID input Nombre, ID botón Aceptar
-- **Formulario 5:** ID botón Solicitar cita
-- **Página sin citas:** ID botón Aceptar (el que devuelve al inicio)
-- **General:** URL de inicio, texto exacto del mensaje "no hay citas"
+- **Formulario 2:** ✅ dropdown `tramiteGrupo[0]`, valor `4112`, botón `btnAceptar`
+- **Formulario 3:** ✅ botón `btnEntrar`
+- **Formulario 4:** ✅ input NIE `txtIdCitado`, input nombre `txtDesCitado`, botón `btnEnviar`
+- **Formulario 5:** ✅ botón `btnEnviar`
+- **Página sin citas:** ✅ botón `btnSalir`, texto "En este momento no hay citas disponibles."
+- **General:** PENDIENTE — URL de inicio
