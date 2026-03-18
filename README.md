@@ -153,12 +153,12 @@ Espera a que la página cargue completamente antes de continuar.
 
 Acciones JS ejecutadas por el script:
 
-1. Seleccionar "Madrid" en el dropdown de provincia → `getElementById('ID_DROPDOWN_PROVINCIA').value = 'VALOR_MADRID'`
-2. Disparar evento `change` → `getElementById('ID_DROPDOWN_PROVINCIA').dispatchEvent(new Event('change', { bubbles: true }))`
-3. Click en botón "Aceptar" → `getElementById('ID_BOTON_ACEPTAR_F1').click()`
+1. Seleccionar "Madrid" en el dropdown de provincia → `getElementById('form').value = '/icpplustiem/citar?p=28&locale=es'`
+2. Disparar evento `change` → `getElementById('form').dispatchEvent(new Event('change', { bubbles: true }))`
+3. Click en botón "Aceptar" → `getElementById('btnAceptar').click()`
 4. Esperar carga de la siguiente página
 
-> **PENDIENTE:** ID del dropdown de provincia, valor de la opción "Madrid", ID del botón Aceptar.
+> **Nota:** El botón Aceptar ejecuta la función JS `envia()` al hacer click. Se usa `.click()` para que se dispare automáticamente.
 
 ### PASO 4 — Formulario 2: Selección de oficina y trámite
 
@@ -343,9 +343,9 @@ El script debe manejar todos estos casos sin quedarse colgado. Si encuentra un e
     "delay_entre_acciones_segundos": 1.0,
     "timeout_carga_pagina_segundos": 15,
     "ids": {
-        "dropdown_provincia": "PENDIENTE",
-        "valor_madrid": "PENDIENTE",
-        "boton_aceptar_f1": "PENDIENTE",
+        "dropdown_provincia": "form",
+        "valor_madrid": "/icpplustiem/citar?p=28&locale=es",
+        "boton_aceptar_f1": "btnAceptar",
         "dropdown_tramite": "PENDIENTE",
         "valor_tramite": "4112",
         "boton_aceptar_f2": "PENDIENTE",
@@ -431,7 +431,7 @@ Recopilar los IDs de los elementos HTML de cada formulario. El usuario navega el
 
 Elementos pendientes por formulario:
 
-- **Formulario 1:** ID dropdown provincia, valor opción Madrid, ID botón Aceptar
+- **Formulario 1:** ✅ dropdown `form`, valor Madrid `/icpplustiem/citar?p=28&locale=es`, botón `btnAceptar`
 - **Formulario 2:** ID dropdown trámite, ID botón Aceptar
 - **Formulario 3:** ID botón Aceptar
 - **Formulario 4:** ID input NIE, ID input Nombre, ID botón Aceptar

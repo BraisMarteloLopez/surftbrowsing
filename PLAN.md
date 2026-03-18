@@ -9,10 +9,10 @@ Antes de implementar, necesito que el usuario proporcione:
 1. **URL de inicio** del portal ICP (la primera página que carga el formulario)
 2. **IDs de elementos HTML** por formulario:
 
-   **Formulario 1 (provincia):**
-   - ID del dropdown de provincia
-   - Valor de la opción "Madrid" dentro de ese dropdown
-   - ID del botón "Aceptar"
+   **Formulario 1 (provincia):** ✅ COMPLETADO
+   - ID del dropdown de provincia: `form`
+   - Valor de la opción "Madrid": `/icpplustiem/citar?p=28&locale=es`
+   - ID del botón "Aceptar": `btnAceptar` (onclick llama a `envia()`)
 
    **Formulario 2 (oficina y trámite):**
    - ID del dropdown de trámite
