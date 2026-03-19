@@ -17,19 +17,19 @@ El bot cumple su objetivo: automatizar la navegación del portal ICP para buscar
 
 | Métrica | Valor |
 |---------|-------|
-| Tests totales | 99 |
-| Tests pasados | 99/99 (100%) |
-| Cobertura | 86% |
-| Warnings | 1 (menor, mock de coroutine en test de reconexión) |
+| Tests totales | 151 |
+| Tests pasados | 151/151 (100%) |
+| Archivos de test | 10 |
+| Módulos cubiertos | `cita_bot.py`, `cdp_helpers.py`, `comportamiento_humano.py` |
 
-**Líneas no cubiertas (61 de 445):** Corresponden principalmente a:
-- `obtener_ws_url()` (conexión real a Brave) — líneas 149-165
-- `alerta_sonora()` (winsound de Windows) — líneas 530-535
-- `conectar_brave()` (conexión WebSocket real) — líneas 579-587
-- Ramas de reconexión y manejo de errores en `main()` — líneas 647+
-- Bloque `if __name__ == "__main__"` — líneas 754-758
+**Desglose por archivo de test:**
+- `test_simulador_humano.py` — 30 tests (SimuladorHumano: estado, scroll, delays, patrones, secuencias)
+- `test_navigation.py` — tests de formularios y navegación (usa `mock_humano` fixture)
+- `test_detection.py` — tests de detección de citas y WAF
+- `test_cdp_session.py` — tests de CDPSession (reconexión, timeouts)
+- `test_backoff.py`, `test_config.py`, `test_integration.py`, `test_js_helpers.py`, `test_main.py`
 
-Todas son funciones que requieren infraestructura externa (Brave, WebSocket real, SO Windows). La cobertura del 86% es adecuada para este tipo de proyecto.
+**Líneas no cubiertas:** Corresponden a funciones que requieren infraestructura externa (Brave, WebSocket real, SO Windows): `obtener_ws_url()`, `alerta_sonora()`, `conectar_brave()`, `main()`, `__main__`.
 
 ---
 
@@ -41,17 +41,21 @@ Todas son funciones que requieren infraestructura externa (Brave, WebSocket real
 - **Separación de config:** `config.json` externaliza los IDs HTML del portal, facilitando mantenimiento si el portal cambia.
 - **BackoffController:** Implementación limpia de backoff exponencial con conteo de errores y alertas por umbral.
 - **CDPSession:** Manejo correcto de WebSocket con callbacks, eventos pre-registrados, y detección de desconexión.
-- **Anti-detección:** Delays aleatorios, scroll humano, jitter en reintentos — reduce riesgo de WAF.
+- **Anti-detección avanzada:** `SimuladorHumano` con movimiento de ratón concurrente durante delays (4 patrones), secuencias pre-acción con orden variable, scroll nativo via `mouseWheel` CDP, estado del ratón Python-side (no JS global).
 
 ### Arquitectura general
 
 ```
-.env (credenciales) → cita_bot.py → CDP WebSocket → Brave Browser → Portal ICP
-                         ↑
-                    config.json (IDs HTML)
+.env (credenciales) → cita_bot.py → comportamiento_humano.py → cdp_helpers.py → Brave Browser → Portal ICP
+                         ↑                    ↑
+                    config.json          SimuladorHumano
+                    (IDs HTML)       (estado ratón, viewport)
 ```
 
-Flujo limpio y directo. No hay sobreingeniería.
+Arquitectura modular en 3 capas tras el refactoring anti-detección (6 fases completadas):
+- `cdp_helpers.py` — Transporte CDP puro
+- `comportamiento_humano.py` — Motor anti-detección (`SimuladorHumano`)
+- `cita_bot.py` — Orquestación de formularios
 
 ---
 
@@ -59,7 +63,7 @@ Flujo limpio y directo. No hay sobreingeniería.
 
 ### Positivo
 
-- **Consistencia:** Todas las funciones siguen el mismo patrón: esperar elemento → scroll → delay → acción → click + esperar carga.
+- **Consistencia:** Todas las funciones de formulario siguen el mismo patrón simplificado: `secuencia_pre_accion(element_id)` → acción JS → siguiente paso.
 - **Escape de strings:** `safe_js_string()` cubre los vectores de inyección JS relevantes (backslash, comillas, newlines, null bytes).
 - **Manejo de errores:** Cada tipo de error tiene su handler específico en `main()` con backoff apropiado.
 - **Logging:** Timestamps + número de intento en cada mensaje. Claro y útil para diagnóstico.
@@ -96,8 +100,9 @@ El documento `TECHNICAL_DEBT.md` identifica 17 ítems. Estado actual:
 
 ## 5. Documentación
 
-- **README.md** (594 líneas): Completo. Cubre instalación, arquitectura, flujo detallado, troubleshooting, y testing.
-- **TECHNICAL_DEBT.md** (517 líneas): Auditoría exhaustiva con análisis de impacto y soluciones.
+- **README.md**: Completo. Cubre instalación, arquitectura modular (3 capas), `SimuladorHumano`, flujo detallado, anti-detección, troubleshooting, y testing.
+- **PLAN_ANTIDETECCION.md**: Plan de refactoring en 6 fases, todas completadas con indicadores de estado.
+- **TECHNICAL_DEBT.md**: Auditoría exhaustiva con análisis de impacto y soluciones (17 ítems, todos cerrados).
 - **Docstrings:** Presentes en todas las funciones y clases públicas.
 - **.env.example:** Documentado con valores por defecto.
 
@@ -130,7 +135,7 @@ El documento `TECHNICAL_DEBT.md` identifica 17 ítems. Estado actual:
 |-----------|-------------|------------|
 | Funcionalidad | 9 | Cumple todos los objetivos planteados |
 | Calidad de código | 8 | Limpio, consistente, bien estructurado |
-| Tests | 9 | 99 tests, 86% cobertura, bien diseñados |
+| Tests | 9 | 151 tests, bien diseñados, cobertura de 3 módulos |
 | Documentación | 9 | README exhaustivo, deuda técnica documentada |
 | Robustez | 8 | Reconexión automática, backoff, manejo de errores |
 | Seguridad | 8 | Escape de strings, credenciales en .env |
@@ -141,7 +146,7 @@ El documento `TECHNICAL_DEBT.md` identifica 17 ítems. Estado actual:
 
 ## Conclusión
 
-La solución está **lista para uso en producción** dentro de su contexto (automatización personal). Los 17 ítems de deuda técnica han sido evaluados y resueltos/descartados con justificación. La suite de 99 tests pasa al 100% con 86% de cobertura. El código es mantenible y configurable.
+La solución está **lista para uso en producción** dentro de su contexto (automatización personal). Los 17 ítems de deuda técnica han sido evaluados y resueltos/descartados con justificación. El refactoring anti-detección (6 fases) ha sido completado, resultando en una arquitectura modular de 3 capas con 151 tests pasando al 100%. El código es mantenible y configurable.
 
 **Recomendaciones para evolución futura:**
 1. Configurar `texto_hay_citas` con el texto real que muestra el portal cuando hay citas disponibles.

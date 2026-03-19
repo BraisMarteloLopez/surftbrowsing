@@ -34,12 +34,66 @@ A través de este canal, el script inyecta sentencias JavaScript directamente en
 - **Hacer click en botones** (`document.getElementById('id').click()`)
 - **Leer contenido de la página** para detectar mensajes como "no hay citas disponibles"
 
+### Estructura modular (3 capas)
+
+El código está organizado en tres módulos con responsabilidades separadas:
+
+```
+cita_bot.py                  ← Orquestación: flujo de formularios y bucle principal
+    │
+    ├── comportamiento_humano.py  ← Motor anti-detección
+    │       ├── SimuladorHumano        ← Clase principal: estado del ratón, viewport, CDP
+    │       ├── Movimiento concurrente ← Ratón se mueve durante delays (asyncio.create_task)
+    │       ├── Secuencias variables   ← Orden aleatorio de acciones pre-formulario
+    │       ├── Scroll nativo          ← mouseWheel via CDP (no JS scrollBy)
+    │       └── Detección WAF          ← detectar_waf(), WafBanError
+    │
+    └── cdp_helpers.py               ← Funciones CDP puras
+            ├── CDPSession             ← WebSocket, reconexión, callbacks
+            ├── ejecutar_js()          ← Evaluación de JS con timeout
+            ├── safe_js_string()       ← Escape de strings para inyección JS
+            └── obtener_ws_url()       ← Descubrimiento de pestaña via HTTP
+```
+
+**`cdp_helpers.py`** contiene la capa de transporte CDP: la clase `CDPSession` (WebSocket con reconexión automática), ejecución de JavaScript, y utilidades de conexión.
+
+**`comportamiento_humano.py`** contiene toda la lógica anti-detección encapsulada en la clase `SimuladorHumano`, que mantiene el estado del ratón (posición x/y) y viewport en Python (no en JS global), y expone métodos como `mover_a()`, `scroll()`, `delay_activo()`, `secuencia_pre_accion()`.
+
+**`cita_bot.py`** contiene la orquestación pura: los 5 pasos de formulario, el bucle principal, la evaluación de resultados, y la alerta sonora. Cada paso de formulario se reduce a llamadas a `humano.secuencia_pre_accion(element_id=...)` seguidas de la acción JS correspondiente.
+
 ### Por qué IDs de elementos HTML como método de interacción
 
 - **Robustez:** Los IDs son identificadores únicos dentro del DOM. A diferencia de XPaths o selectores CSS compuestos, no dependen de la estructura jerárquica de la página ni de clases CSS que pueden cambiar por motivos estéticos.
 - **Simplicidad:** Una línea de JS por acción. No se necesitan frameworks ni librerías de scraping.
 - **Mantenimiento:** Si el portal cambia un ID, el cambio es una edición de una línea en el archivo de configuración. No requiere modificar lógica del script.
 - **Indetectable:** JavaScript ejecutado vía CDP en el contexto de la página es idéntico a JavaScript ejecutado desde la consola del navegador por un humano. No existe flag, header ni fingerprint que lo distinga de una interacción manual.
+
+### Clase `SimuladorHumano`
+
+La clase `SimuladorHumano` (en `comportamiento_humano.py`) es el componente central de la anti-detección. Encapsula:
+
+- **Estado del ratón** (`mouse_x`, `mouse_y`): posición mantenida en Python, actualizada con cada movimiento
+- **Viewport** (`viewport`): dimensiones reales leídas via CDP
+- **Sesión CDP** (`cdp`): referencia a la conexión WebSocket
+
+Métodos principales:
+
+| Método | Descripción |
+|--------|-------------|
+| `mover_a(x, y)` | Trayectoria curva con easing smoothstep `t²(3-2t)` |
+| `mover_a_elemento(id)` | Obtiene posición del elemento y mueve el cursor |
+| `movimiento_idle()` | 1-3 movimientos aleatorios por el viewport |
+| `scroll()` | 2-4 pasos de scroll via `mouseWheel` CDP nativo |
+| `delay_activo(base, varianza)` | Espera con movimiento de ratón concurrente |
+| `pausa_lectura()` | Pausa entre formularios con movimiento de fondo |
+| `pausa_extra(prob)` | Pausa adicional con probabilidad configurable |
+| `secuencia_pre_accion(element_id)` | 2-4 acciones preparatorias en orden aleatorio |
+
+Cada paso de formulario se reduce a:
+```python
+await humano.secuencia_pre_accion(element_id=ids["dropdown_provincia"])
+await ejecutar_js(cdp, "...seleccionar valor...")
+```
 
 ### Diferencia con Selenium/WebDriver
 
@@ -253,15 +307,23 @@ El objetivo es que cuando el usuario llegue al navegador, la página esté exact
 
 El script implementa múltiples capas de temporización para simular comportamiento humano y evitar el bloqueo del WAF del portal:
 
-### 7.1. Delays entre acciones (`DELAY_ACCION_BASE` + `DELAY_ACCION_VARIANZA`)
+### 7.1. Delays activos con movimiento concurrente (`DELAY_ACCION_BASE` + `DELAY_ACCION_VARIANZA`)
 
-Antes de cada interacción con un elemento (seleccionar, rellenar, click), el script espera:
+Antes de cada interacción con un elemento, el script ejecuta un **delay activo**: mientras espera el tiempo configurado, el ratón se mueve de fondo simulando lectura. Esto evita que el ratón quede completamente quieto durante 2-5 segundos (comportamiento no humano).
 
 ```
 delay = DELAY_ACCION_BASE + random(0, DELAY_ACCION_BASE × DELAY_ACCION_VARIANZA)
 ```
 
 Con los valores por defecto (`base=2.0`, `varianza=0.8`), cada acción espera entre **2.0 y 3.6 segundos**.
+
+Durante el delay, se ejecuta concurrentemente (`asyncio.create_task`) uno de 4 patrones de movimiento de ratón:
+- **Reposo**: micro-movimientos (±20px) cerca de la posición actual
+- **Lectura**: barrido horizontal simulando lectura de texto (izquierda→derecha, bajando)
+- **Exploración**: movimientos suaves entre zonas de interés del viewport
+- **Drift**: movimiento muy lento y continuo en una dirección con correcciones
+
+La tarea de movimiento se cancela limpiamente cuando el delay termina.
 
 ### 7.2. Pausa entre formularios (`PAUSA_ENTRE_PASOS_MIN` / `_MAX`)
 
@@ -273,9 +335,11 @@ pausa = random(PAUSA_ENTRE_PASOS_MIN, PAUSA_ENTRE_PASOS_MAX)
 
 Por defecto: **2 a 5 segundos** entre cada formulario.
 
-### 7.3. Scroll humano (`DELAY_SCROLL_MIN` / `_MAX`)
+### 7.3. Scroll nativo via CDP (`DELAY_SCROLL_MIN` / `_MAX`)
 
-En cada formulario, el script hace scroll de 1 a 3 veces con distancias aleatorias (100-300px) y pausas entre cada scroll:
+En cada formulario, el script hace scroll de 2 a 4 veces usando eventos **`Input.dispatchMouseEvent`** con `type: "mouseWheel"` directamente via CDP. Esto genera eventos de rueda de ratón nativos idénticos a los de un usuario real, a diferencia del anterior `window.scrollBy()` que era detectable como JavaScript inyectado.
+
+Entre cada paso de scroll, se añaden **micro-movimientos del ratón** (±8px horizontal, ±5px vertical) que simulan el temblor natural de la mano mientras se usa la rueda del ratón.
 
 ```
 pausa_scroll = random(DELAY_SCROLL_MIN, DELAY_SCROLL_MAX)
@@ -650,37 +714,63 @@ URL de inicio: `https://icp.administracionelectronica.gob.es/icpplus/index.html`
 
 ```
 surftbrowsing/
-├── cita_bot.py            # Script principal
-├── config.json            # IDs de elementos HTML del portal
-├── .env.example           # Plantilla de configuración personal
-├── .env                   # Configuración personal (no se sube al repo)
-├── requirements.txt       # Dependencias de producción
-├── requirements-dev.txt   # Dependencias de desarrollo (pytest, coverage)
-├── README.md              # Este documento
-├── TECHNICAL_DEBT.md      # Auditoría técnica detallada (17 ítems analizados)
-└── tests/                 # Tests automatizados (106+ tests)
-    ├── conftest.py        # Fixtures: MockWebSocket, mock_cdp
-    ├── test_backoff.py    # Tests de BackoffController
-    ├── test_cdp_session.py # Tests de CDPSession (reconexión, timeouts)
-    ├── test_config.py     # Validación de config.json
-    ├── test_detection.py  # Tests de detección de citas (falsos positivos)
-    ├── test_integration.py # Tests de integración (reconexión, backoff, URL)
-    ├── test_js_helpers.py # Tests de safe_js_string (escape de strings)
-    ├── test_main.py       # Tests del bucle principal
-    └── test_navigation.py # Tests de formularios y navegación
+├── cita_bot.py                # Orquestación: formularios, bucle principal, evaluación
+├── comportamiento_humano.py   # Motor anti-detección: SimuladorHumano, WAF, delays
+├── cdp_helpers.py             # Capa CDP: CDPSession, ejecutar_js, safe_js_string
+├── config.json                # IDs de elementos HTML del portal
+├── .env.example               # Plantilla de configuración personal
+├── .env                       # Configuración personal (no se sube al repo)
+├── requirements.txt           # Dependencias de producción
+├── requirements-dev.txt       # Dependencias de desarrollo (pytest, coverage)
+├── README.md                  # Este documento
+├── PLAN_ANTIDETECCION.md      # Plan de refactoring anti-detección (6 fases, completado)
+├── EVALUATION.md              # Evaluación de la solución
+├── TECHNICAL_DEBT.md          # Auditoría técnica detallada (17 ítems analizados)
+└── tests/                     # Tests automatizados (151 tests)
+    ├── conftest.py            # Fixtures: MockWebSocket, mock_cdp
+    ├── test_backoff.py        # Tests de BackoffController
+    ├── test_cdp_session.py    # Tests de CDPSession (reconexión, timeouts)
+    ├── test_config.py         # Validación de config.json
+    ├── test_detection.py      # Tests de detección de citas y WAF
+    ├── test_integration.py    # Tests de integración (reconexión, backoff, URL)
+    ├── test_js_helpers.py     # Tests de safe_js_string (escape de strings)
+    ├── test_main.py           # Tests del bucle principal
+    ├── test_navigation.py     # Tests de formularios y navegación
+    └── test_simulador_humano.py # Tests de SimuladorHumano (30 tests)
 ```
 
 ### Ejecutar tests
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest tests/ -v                         # Todos los tests
-python -m pytest tests/ --cov=cita_bot              # Con cobertura
+python -m pytest tests/ -v                                                      # Todos los tests
+python -m pytest tests/ --cov=cita_bot --cov=cdp_helpers --cov=comportamiento_humano  # Con cobertura
 ```
 
 ---
 
-## 18. Deuda técnica
+## 18. Refactoring anti-detección
+
+El archivo `PLAN_ANTIDETECCION.md` documenta un refactoring en 6 fases para mejorar la evasión de detección del WAF. **Todas las fases están completadas:**
+
+| Fase | Descripción | Estado |
+|------|-------------|--------|
+| 0 | Extraer `cdp_helpers.py` (capa CDP pura) | Completada |
+| 1 | Extraer `comportamiento_humano.py` (funciones anti-detección) | Completada |
+| 2 | Clase `SimuladorHumano` con estado persistente del ratón | Completada |
+| 3 | Movimiento de ratón concurrente durante delays (`asyncio.create_task`) | Completada |
+| 4 | Secuencias pre-acción con orden variable (`secuencia_pre_accion()`) | Completada |
+| 5 | Scroll nativo via `mouseWheel` CDP (reemplaza `window.scrollBy()` JS) | Completada |
+
+Mejoras clave:
+- **Ratón nunca quieto**: durante delays de 2-5s, el ratón se mueve con 4 patrones diferentes
+- **Secuencias impredecibles**: cada acción de formulario ejecuta 2-4 acciones preparatorias en orden aleatorio
+- **Scroll indetectable**: eventos `mouseWheel` nativos via CDP, indistinguibles de un usuario real
+- **Estado Python-side**: posición del ratón mantenida en `SimuladorHumano`, sin `window.__mouse_pos` global JS
+
+---
+
+## 19. Deuda técnica
 
 El archivo `TECHNICAL_DEBT.md` documenta 17 puntos de falla identificados en una auditoría exhaustiva del código. De estos:
 

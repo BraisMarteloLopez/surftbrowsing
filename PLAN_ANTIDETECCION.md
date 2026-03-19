@@ -1,5 +1,7 @@
 # Plan: Sistema de Anti-Detección Desacoplado
 
+> **Estado: COMPLETADO** — Todas las 6 fases implementadas y testeadas (151 tests, 100% pasando)
+
 ## Problema actual
 
 1. **Movimientos de ratón discretos**: `mover_raton()` ejecuta una trayectoria punto-a-punto en ~0.3-0.5s y termina. Durante los `delay()` y `pausa_entre_pasos()` (2-5s cada uno) el ratón está **completamente quieto** — un humano real nunca deja el ratón inmóvil durante 5 segundos mientras "lee" una página.
@@ -30,7 +32,7 @@ cita_bot.py              ← Flujo de formularios (orquestación pura)
 
 ---
 
-## Fase 0 — Extraer helpers CDP (base para todo lo demás)
+## Fase 0 — Extraer helpers CDP (base para todo lo demás) ✅ COMPLETADA
 
 **Objetivo**: Mover funciones CDP genéricas que no son ni anti-detección ni formulario a su propio módulo. Esto reduce el acoplamiento base.
 
@@ -49,7 +51,7 @@ cita_bot.py              ← Flujo de formularios (orquestación pura)
 
 ---
 
-## Fase 1 — Extraer módulo `comportamiento_humano.py`
+## Fase 1 — Extraer módulo `comportamiento_humano.py` ✅ COMPLETADA
 
 **Objetivo**: Mover toda la lógica anti-detección a un módulo independiente, manteniendo la API secuencial actual (sin cambios de comportamiento todavía).
 
@@ -69,7 +71,7 @@ cita_bot.py              ← Flujo de formularios (orquestación pura)
 
 ---
 
-## Fase 2 — Clase `SimuladorHumano` con estado persistente
+## Fase 2 — Clase `SimuladorHumano` con estado persistente ✅ COMPLETADA
 
 **Objetivo**: Encapsular el estado del ratón y el viewport en una clase que los formularios usen como contexto, eliminando el estado global en `window.__mouse_pos`.
 
@@ -134,7 +136,7 @@ class SimuladorHumano:
 
 ---
 
-## Fase 3 — Movimiento de ratón concurrente durante pausas
+## Fase 3 — Movimiento de ratón concurrente durante pausas ✅ COMPLETADA
 
 **Objetivo**: El ratón se mueve suavemente **durante** los delays, no solo antes/después. Esta es la mejora clave que el usuario pide.
 
@@ -235,7 +237,7 @@ async def _movimiento_lectura(self, duracion: float) -> None:
 
 ---
 
-## Fase 4 — Variabilidad de secuencia en formularios
+## Fase 4 — Variabilidad de secuencia en formularios ✅ COMPLETADA
 
 **Objetivo**: Romper el patrón repetitivo `mouse_idle → scroll → delay → mouse_elemento → acción` que es idéntico en todos los formularios.
 
@@ -289,7 +291,7 @@ async def secuencia_pre_accion(self, element_id: str | None = None) -> None:
 
 ---
 
-## Fase 5 — Scroll con movimiento de ratón integrado
+## Fase 5 — Scroll con movimiento de ratón integrado ✅ COMPLETADA
 
 **Objetivo**: El scroll actual usa `window.scrollBy()` via JS, que no deja rastro de cursor. Un humano mueve la rueda del ratón (generando eventos `Input.dispatchMouseEvent` con `type: "mouseWheel"`) o arrastra la barra de scroll.
 
@@ -314,22 +316,22 @@ async def secuencia_pre_accion(self, element_id: str | None = None) -> None:
 ## Resumen de fases y dependencias
 
 ```
-Fase 0: Extraer cdp_helpers.py
+Fase 0: Extraer cdp_helpers.py                              ✅
   │
   ▼
-Fase 1: Extraer comportamiento_humano.py (funciones sueltas)
+Fase 1: Extraer comportamiento_humano.py (funciones sueltas) ✅
   │
   ▼
-Fase 2: Clase SimuladorHumano (encapsular estado)
+Fase 2: Clase SimuladorHumano (encapsular estado)            ✅
   │
-  ├──▶ Fase 3: delay_activo() con movimiento concurrente  ← CAMBIO CLAVE
+  ├──▶ Fase 3: delay_activo() con movimiento concurrente     ✅ ← CAMBIO CLAVE
   │
-  ├──▶ Fase 4: secuencia_pre_accion() variable
+  ├──▶ Fase 4: secuencia_pre_accion() variable               ✅
   │
-  └──▶ Fase 5: Scroll nativo via mouseWheel
+  └──▶ Fase 5: Scroll nativo via mouseWheel                  ✅
 ```
 
-Fases 3, 4 y 5 son independientes entre sí y se pueden implementar en paralelo o en cualquier orden tras completar Fase 2.
+**Todas las fases completadas.** Tests pasaron de 120 a 151 durante la implementación.
 
 ---
 
