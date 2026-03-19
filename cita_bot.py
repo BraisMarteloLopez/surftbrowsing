@@ -336,8 +336,6 @@ async def delay() -> None:
 async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
     """Formulario 1: Selección de provincia (Madrid)."""
     log("Formulario 1: seleccionando provincia Madrid")
-    await scroll_humano(cdp)
-    await delay()
 
     dropdown_id = safe_js_string(ids["dropdown_provincia"])
     valor = safe_js_string(ids["valor_madrid"])
@@ -345,6 +343,9 @@ async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
 
     if not await esperar_elemento(cdp, ids["dropdown_provincia"]):
         raise RuntimeError(f"Elemento #{ids['dropdown_provincia']} no apareció tras carga de página")
+
+    await scroll_humano(cdp)
+    await delay()
 
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
@@ -359,8 +360,6 @@ async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
 async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
     """Formulario 2: Selección de trámite."""
     log("Formulario 2: seleccionando trámite")
-    await scroll_humano(cdp)
-    await delay()
 
     dropdown_id = safe_js_string(ids["dropdown_tramite"])
     valor = safe_js_string(ids["valor_tramite"])
@@ -368,6 +367,9 @@ async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
 
     if not await esperar_elemento(cdp, ids["dropdown_tramite"]):
         raise RuntimeError(f"Elemento #{ids['dropdown_tramite']} no apareció tras carga de página")
+
+    await scroll_humano(cdp)
+    await delay()
 
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
@@ -382,13 +384,14 @@ async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
 async def paso_formulario_3(cdp: CDPSession, ids: dict) -> None:
     """Formulario 3: Aviso informativo — click en Entrar."""
     log("Formulario 3: aceptando aviso")
-    await scroll_humano(cdp)
-    await delay()
 
     boton_id = safe_js_string(ids["boton_entrar_f3"])
 
     if not await esperar_elemento(cdp, ids["boton_entrar_f3"]):
         raise RuntimeError(f"Elemento #{ids['boton_entrar_f3']} no apareció tras carga de página")
+
+    await scroll_humano(cdp)
+    await delay()
 
     log("Formulario 3: aviso aceptado, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
