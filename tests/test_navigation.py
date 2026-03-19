@@ -13,6 +13,7 @@ from cita_bot import (
     CDPSession, EstadoPagina, WafBanError,
     navegar, click_y_esperar_carga, scroll_humano, verificar_url,
     esperar_elemento, click_salir, delay, pausa_entre_pasos,
+    limpiar_datos_navegador,
     paso_formulario_1, paso_formulario_2, paso_formulario_3,
     paso_formulario_4, paso_formulario_5,
     ciclo_completo, evaluar_estado_pagina, detectar_waf,
@@ -443,3 +444,47 @@ class TestEjecutarJs:
         result = await ejecutar_js(cdp, "21 * 2;", timeout=2.0)
         assert result == {"type": "number", "value": 42}
         await cdp.close()
+
+
+# ---------------------------------------------------------------------------
+# limpiar_datos_navegador
+# ---------------------------------------------------------------------------
+
+class TestLimpiarDatosNavegador:
+    @pytest.mark.asyncio
+    async def test_limpia_storage_y_cache(self):
+        """Envía comandos CDP para limpiar storage y caché HTTP."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+
+        await limpiar_datos_navegador(cdp, "https://icp.administracionelectronica.gob.es/icpplus/index.html")
+
+        # Debe enviar Storage.clearDataForOrigin, Network.enable y Network.clearBrowserCache
+        methods = [c[0][0] for c in cdp.send.call_args_list]
+        assert "Storage.clearDataForOrigin" in methods
+        assert "Network.clearBrowserCache" in methods
+
+        # Verificar que el origin se extrae correctamente (sin path)
+        storage_call = [c for c in cdp.send.call_args_list if c[0][0] == "Storage.clearDataForOrigin"][0]
+        assert storage_call[0][1]["origin"] == "https://icp.administracionelectronica.gob.es"
+
+    @pytest.mark.asyncio
+    async def test_limpia_no_incluye_cookies(self):
+        """No debe incluir 'cookies' en los storageTypes."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+
+        await limpiar_datos_navegador(cdp, "https://icp.administracionelectronica.gob.es/icpplus/index.html")
+
+        storage_call = [c for c in cdp.send.call_args_list if c[0][0] == "Storage.clearDataForOrigin"][0]
+        storage_types = storage_call[0][1]["storageTypes"]
+        assert "cookies" not in storage_types
+
+    @pytest.mark.asyncio
+    async def test_limpia_no_crashea_si_falla(self):
+        """Si CDP falla, no lanza excepción (solo loguea)."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(side_effect=RuntimeError("CDP error"))
+
+        # No debe lanzar excepción
+        await limpiar_datos_navegador(cdp, "https://example.com/page")

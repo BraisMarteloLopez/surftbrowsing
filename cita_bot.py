@@ -370,6 +370,49 @@ async def detectar_waf(cdp: CDPSession) -> bool:
         return False
 
 
+async def limpiar_datos_navegador(cdp: CDPSession, origin: str) -> None:
+    """Limpia caché HTTP y storage del navegador para un origin, sin tocar cookies.
+
+    Usa CDP Storage.clearDataForOrigin para borrar:
+    - Caché HTTP (appcache, cache_storage)
+    - localStorage, sessionStorage, IndexedDB, WebSQL
+    - Service workers
+
+    NO borra cookies para no perder la sesión activa.
+    """
+    # Extraer origin (scheme + host) de la URL completa
+    # "https://icp.administracionelectronica.gob.es/icpplus/index.html"
+    # → "https://icp.administracionelectronica.gob.es"
+    from urllib.parse import urlparse
+    parsed = urlparse(origin)
+    clean_origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    storage_types = (
+        "appcache,"
+        "cache_storage,"
+        "indexeddb,"
+        "local_storage,"
+        "service_workers,"
+        "websql"
+    )
+
+    try:
+        await cdp.send("Storage.clearDataForOrigin", {
+            "origin": clean_origin,
+            "storageTypes": storage_types,
+        }, timeout=TIMEOUT_JS)
+        log("Caché y storage del navegador limpiados")
+    except Exception as e:
+        log(f"No se pudo limpiar caché del navegador: {e}")
+
+    # Limpiar también la caché HTTP global del navegador
+    try:
+        await cdp.send("Network.enable", timeout=TIMEOUT_JS)
+        await cdp.send("Network.clearBrowserCache", timeout=TIMEOUT_JS)
+    except Exception as e:
+        log(f"No se pudo limpiar caché HTTP global: {e}")
+
+
 async def delay() -> None:
     """Pausa aleatoria entre acciones para simular comportamiento humano."""
     extra = DELAY_ACCION_BASE * random.uniform(0, DELAY_ACCION_VARIANZA)
@@ -778,8 +821,10 @@ async def main() -> None:
                 backoff.registrar_exito()
                 waf_backoff.registrar_exito()
                 log("Resultado: NO HAY CITAS")
-                if await click_salir(cdp, ids):
-                    skip_navegacion = True
+                await click_salir(cdp, ids)
+                # Limpiar caché y storage antes del siguiente ciclo
+                await limpiar_datos_navegador(cdp, url_inicio)
+                skip_navegacion = False
                 espera = intervalo_con_jitter(INTERVALO_REINTENTO)
                 log(f"Reintentando en {espera:.0f}s...")
                 await asyncio.sleep(espera)

@@ -225,8 +225,9 @@ La evaluación de la página combina múltiples verificaciones (detección WAF, 
 **Estado: NO HAY CITAS** (texto "no hay citas" confirmado — señal definitiva)
 
 1. Intenta hacer click en el botón "Salir" → `getElementById('btnSalir').click()`. Si falla, continúa igualmente.
-2. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS` ±15% jitter)
-3. Si "Salir" funcionó, el portal ya devuelve al inicio: el script **reutiliza la sesión sin navegar de nuevo** a la URL de inicio (reduce peticiones HTTP). Si falló, navega desde cero.
+2. **Limpia caché y storage del navegador** (caché HTTP, localStorage, sessionStorage, IndexedDB, service workers). No borra cookies para no afectar la sesión.
+3. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS` ±15% jitter).
+4. Navega desde cero a la URL de inicio para iniciar un ciclo limpio.
 
 **Estado: HAY CITAS** (sin texto negativo + URL del portal válida + contenido suficiente + texto positivo si configurado)
 
