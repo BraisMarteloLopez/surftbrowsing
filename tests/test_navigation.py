@@ -61,25 +61,39 @@ class TestScrollHumano:
     @pytest.mark.asyncio
     @patch("comportamiento_humano.random.randint", return_value=3)
     @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
-    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
-    async def test_scroll_ejecuta_pasos_aleatorios(self, mock_ejs, mock_sleep, mock_randint):
+    async def test_scroll_ejecuta_pasos_aleatorios(self, mock_sleep, mock_randint):
         cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
         await scroll_humano(cdp)
-        # randint(2, 4) mockeado a 3 → 3 llamadas a scrollBy
-        assert mock_ejs.call_count == 3
-        for call_args in mock_ejs.call_args_list:
-            js_code = call_args[0][1]
-            assert "scrollBy" in js_code
-            assert "smooth" in js_code
+        # randint mockeado a 3 → 3 mouseWheel + 2 mouseMoved (micro-movimientos entre pasos)
+        wheel_calls = [c for c in cdp.send.call_args_list
+                       if c[0][0] == "Input.dispatchMouseEvent" and c[0][1].get("type") == "mouseWheel"]
+        assert len(wheel_calls) == 3
+        for wc in wheel_calls:
+            assert wc[0][1]["deltaY"] > 0
 
     @pytest.mark.asyncio
     @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
-    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
-    async def test_scroll_pasos_entre_2_y_4(self, mock_ejs, mock_sleep):
-        """scroll_humano ejecuta entre 2 y 4 pasos."""
+    async def test_scroll_pasos_entre_2_y_4(self, mock_sleep):
+        """scroll_humano genera entre 2 y 4 eventos mouseWheel."""
         cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
         await scroll_humano(cdp)
-        assert 2 <= mock_ejs.call_count <= 4
+        wheel_calls = [c for c in cdp.send.call_args_list
+                       if c[0][0] == "Input.dispatchMouseEvent" and c[0][1].get("type") == "mouseWheel"]
+        assert 2 <= len(wheel_calls) <= 4
+
+    @pytest.mark.asyncio
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_scroll_incluye_micro_movimientos(self, mock_sleep):
+        """scroll_humano genera mouseMoved entre pasos de scroll."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+        await scroll_humano(cdp)
+        moved_calls = [c for c in cdp.send.call_args_list
+                       if c[0][0] == "Input.dispatchMouseEvent" and c[0][1].get("type") == "mouseMoved"]
+        # Al menos 1 micro-movimiento (pasos - 1, con mínimo 2 pasos → ≥1)
+        assert len(moved_calls) >= 1
 
 
 # ---------------------------------------------------------------------------

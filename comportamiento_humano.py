@@ -208,11 +208,43 @@ async def mover_raton_a_elemento(cdp: CDPSession, element_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def scroll_humano(cdp: CDPSession) -> None:
-    """Simula scroll humano hacia abajo: 2-4 pasos con distancia y delay aleatorios."""
+    """Simula scroll humano hacia abajo con eventos mouseWheel nativos.
+
+    Usa Input.dispatchMouseEvent con type mouseWheel en vez de JS scrollBy,
+    lo cual genera rastro de cursor real en el navegador. Incluye
+    micro-movimientos del ratón entre pasos de scroll.
+    """
     pasos = random.randint(2, 4)
-    for _ in range(pasos):
+    # Posición aproximada del ratón (sin estado persistente en standalone)
+    x = random.randint(300, 700)
+    y = random.randint(200, 500)
+
+    for i in range(pasos):
         distancia = random.randint(100, 300)
-        await ejecutar_js(cdp, f"window.scrollBy({{ top: {distancia}, behavior: 'smooth' }});")
+        try:
+            await cdp.send("Input.dispatchMouseEvent", {
+                "type": "mouseWheel",
+                "x": x,
+                "y": y,
+                "deltaX": 0,
+                "deltaY": distancia,
+            }, timeout=TIMEOUT_JS)
+        except Exception:
+            pass
+
+        # Micro-movimiento entre pasos de scroll
+        if i < pasos - 1:
+            x += random.randint(-8, 8)
+            y += random.randint(-5, 5)
+            try:
+                await cdp.send("Input.dispatchMouseEvent", {
+                    "type": "mouseMoved",
+                    "x": max(0, x),
+                    "y": max(0, y),
+                }, timeout=TIMEOUT_JS)
+            except Exception:
+                pass
+
         await asyncio.sleep(random.uniform(DELAY_SCROLL_MIN, DELAY_SCROLL_MAX))
 
 
@@ -339,11 +371,41 @@ class SimuladorHumano:
             await asyncio.sleep(random.uniform(0.3, 1.0))
 
     async def scroll(self) -> None:
-        """Scroll humanizado 2-4 pasos."""
+        """Scroll humanizado 2-4 pasos via eventos mouseWheel nativos.
+
+        Usa la posición actual del ratón para generar eventos mouseWheel
+        realistas. Incluye micro-movimientos entre pasos de scroll,
+        como haría un humano que no mantiene la mano perfectamente quieta.
+        """
         pasos = random.randint(2, 4)
-        for _ in range(pasos):
+        for i in range(pasos):
             distancia = random.randint(100, 300)
-            await ejecutar_js(self.cdp, f"window.scrollBy({{ top: {distancia}, behavior: 'smooth' }});")
+            try:
+                await self.cdp.send("Input.dispatchMouseEvent", {
+                    "type": "mouseWheel",
+                    "x": self.mouse_x,
+                    "y": self.mouse_y,
+                    "deltaX": 0,
+                    "deltaY": distancia,
+                }, timeout=TIMEOUT_JS)
+            except Exception:
+                pass
+
+            # Micro-movimiento entre pasos de scroll
+            if i < pasos - 1:
+                self.mouse_x += random.randint(-8, 8)
+                self.mouse_y += random.randint(-5, 5)
+                self.mouse_x = max(0, self.mouse_x)
+                self.mouse_y = max(0, self.mouse_y)
+                try:
+                    await self.cdp.send("Input.dispatchMouseEvent", {
+                        "type": "mouseMoved",
+                        "x": self.mouse_x,
+                        "y": self.mouse_y,
+                    }, timeout=TIMEOUT_JS)
+                except Exception:
+                    pass
+
             await asyncio.sleep(random.uniform(DELAY_SCROLL_MIN, DELAY_SCROLL_MAX))
 
     async def delay_activo(self, base: float = DELAY_ACCION_BASE,

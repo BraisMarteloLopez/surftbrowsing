@@ -125,6 +125,75 @@ class TestSimuladorHumanoEstado:
 
 
 # ---------------------------------------------------------------------------
+# Fase 5: Scroll nativo via mouseWheel
+# ---------------------------------------------------------------------------
+
+class TestSimuladorScroll:
+    @pytest.mark.asyncio
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_scroll_genera_mousewheel(self, mock_sleep):
+        """scroll() envía eventos mouseWheel via CDP."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+        humano = SimuladorHumano(cdp)
+        humano.mouse_x = 500
+        humano.mouse_y = 400
+
+        await humano.scroll()
+
+        wheel_calls = [c for c in cdp.send.call_args_list
+                       if c[0][0] == "Input.dispatchMouseEvent" and c[0][1].get("type") == "mouseWheel"]
+        assert 2 <= len(wheel_calls) <= 4
+        for wc in wheel_calls:
+            assert wc[0][1]["deltaY"] > 0
+            assert wc[0][1]["deltaX"] == 0
+
+    @pytest.mark.asyncio
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_scroll_usa_posicion_raton_actual(self, mock_sleep):
+        """scroll() usa self.mouse_x/y como posición de los eventos."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+        humano = SimuladorHumano(cdp)
+        humano.mouse_x = 600
+        humano.mouse_y = 350
+
+        with patch("comportamiento_humano.random.randint", return_value=2):
+            await humano.scroll()
+
+        wheel_call = [c for c in cdp.send.call_args_list
+                      if c[0][0] == "Input.dispatchMouseEvent" and c[0][1].get("type") == "mouseWheel"][0]
+        assert wheel_call[0][1]["x"] == 600
+        assert wheel_call[0][1]["y"] == 350
+
+    @pytest.mark.asyncio
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_scroll_micro_movimientos_entre_pasos(self, mock_sleep):
+        """scroll() genera mouseMoved entre pasos de scroll."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+        humano = SimuladorHumano(cdp)
+
+        with patch("comportamiento_humano.random.randint", return_value=3):
+            await humano.scroll()
+
+        moved_calls = [c for c in cdp.send.call_args_list
+                       if c[0][0] == "Input.dispatchMouseEvent" and c[0][1].get("type") == "mouseMoved"]
+        # 3 pasos → 2 micro-movimientos entre ellos
+        assert len(moved_calls) == 2
+
+    @pytest.mark.asyncio
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_scroll_cdp_falla_no_crashea(self, mock_sleep):
+        """Si CDP falla durante scroll, no lanza excepción."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(side_effect=RuntimeError("CDP error"))
+        humano = SimuladorHumano(cdp)
+
+        await humano.scroll()
+
+
+# ---------------------------------------------------------------------------
 # Fase 3: Movimiento concurrente durante delays
 # ---------------------------------------------------------------------------
 
