@@ -21,6 +21,11 @@
 | TD-10 | Sin tests automatizados | Media (Calidad) | N/A | **Resuelto** |
 | TD-11 | Alerta sonora inútil en Linux/Mac | Baja | Alta en Linux | Descartada |
 | TD-12 | Timeout uniforme para todas las operaciones CDP | Baja-Media | Baja | **Resuelto** |
+| TD-13 | `esperar_elemento` escapa IDs redundantemente | Baja-Media | Baja | Pendiente |
+| TD-14 | `click_salir` lanza RuntimeError en vez de tolerar fallos | Media | Media | Pendiente |
+| TD-15 | `scroll_humano` se ejecuta antes de verificar que la página cargó | Media | Media-Alta | Pendiente |
+| TD-16 | `asyncio.get_event_loop()` deprecado en `esperar_elemento` | Baja | Baja | Pendiente |
+| TD-17 | Timeout de `esperar_elemento` hardcoded (10s) | Baja-Media | Baja | Pendiente |
 
 ---
 
@@ -333,11 +338,179 @@ Pasar `timeout` como parámetro a `send()` o usar un wrapper que seleccione el t
 
 ---
 
+## TD-13 — `esperar_elemento` escapa IDs redundantemente
+
+**Severidad:** Baja-Media
+**Probabilidad:** Baja (los IDs actuales de `config.json` no tienen caracteres especiales)
+**Ubicación:** `cita_bot.py:300-310`, funciones `paso_formulario_1` a `paso_formulario_5`
+
+### Descripción
+
+`esperar_elemento()` aplica `safe_js_string()` internamente al `element_id`:
+
+```python
+async def esperar_elemento(cdp, element_id, ...):
+    escaped = safe_js_string(element_id)  # escapa aquí
+```
+
+Pero cada formulario **también** escapa el mismo ID por su cuenta:
+
+```python
+dropdown_id = safe_js_string(ids["dropdown_provincia"])  # escapa aquí también
+if not await esperar_elemento(cdp, ids["dropdown_provincia"]):  # y aquí otra vez dentro
+```
+
+El ID se escapa en dos sitios distintos con dos variables distintas. Funciona por casualidad porque los IDs del `config.json` no contienen caracteres especiales. Si algún día un ID tuviera una comilla simple, no habría doble-escape (porque se escapan sobre la misma fuente `ids[...]`, no uno sobre el resultado del otro), pero la redundancia genera confusión y es un punto frágil de mantenimiento.
+
+### Solución propuesta
+
+Definir una convención única: o `esperar_elemento` recibe el ID **ya escapado**, o lo escapa internamente y los formularios no lo escapan para esa llamada. La opción más limpia: `esperar_elemento` recibe el ID **crudo** y se responsabiliza de escaparlo. Los formularios solo escapan cuando construyen el JS de escritura/click.
+
+---
+
+## TD-14 — `click_salir` lanza RuntimeError en vez de tolerar fallos
+
+**Severidad:** Media
+**Probabilidad:** Media (página cargada parcialmente, sesión expirada, portal en mantenimiento)
+**Ubicación:** `cita_bot.py:492-499`
+
+### Descripción
+
+`click_salir()` ahora incluye `esperar_elemento` que lanza `RuntimeError` si el botón no aparece en 10s:
+
+```python
+async def click_salir(cdp, ids):
+    if not await esperar_elemento(cdp, ids["boton_salir_nocita"]):
+        raise RuntimeError(...)  # ← explota
+    await click_y_esperar_carga(...)
+```
+
+`click_salir` es una función de **limpieza/navegación** que se ejecuta después de detectar "no hay citas". Su propósito es devolver al usuario al inicio del portal. Si falla, el ciclo debería simplemente navegar al inicio directamente (`navegar(cdp, url_inicio)`). No debería ser tratado con la misma severidad que un fallo en un formulario.
+
+Sin embargo, al lanzar `RuntimeError`, sube al handler genérico del `main()` que aplica backoff exponencial — es decir, un fallo de limpieza produce una penalización de tiempo idéntica a un fallo estructural del portal.
+
+### Solución propuesta
+
+`click_salir` debería ser tolerante a fallos:
+
+```python
+async def click_salir(cdp, ids):
+    if not await esperar_elemento(cdp, ids["boton_salir_nocita"]):
+        log("Botón Salir no encontrado, se navegará al inicio directamente")
+        return False  # señal de que no se pudo salir limpiamente
+    await click_y_esperar_carga(...)
+    return True
+```
+
+El llamador en `main()` usaría el retorno para decidir si necesita `navegar(url_inicio)` explícitamente.
+
+---
+
+## TD-15 — `scroll_humano` se ejecuta antes de verificar que la página cargó
+
+**Severidad:** Media
+**Probabilidad:** Media-Alta (cualquier carga lenta del portal)
+**Ubicación:** `cita_bot.py:333-353` (F1), `cita_bot.py:356-376` (F2), `cita_bot.py:379-391` (F3)
+
+### Descripción
+
+En los formularios 1, 2 y 3, el orden de operaciones es:
+
+```python
+await scroll_humano(cdp)                          # 1. scroll
+await delay()                                      # 2. espera
+if not await esperar_elemento(cdp, ids[...]):       # 3. verificar que el DOM está listo
+    raise RuntimeError(...)
+await ejecutar_js(cdp, ...)                        # 4. actuar
+```
+
+El problema es que `scroll_humano` (paso 1) se ejecuta **antes** de `esperar_elemento` (paso 3). Si la página aún no ha cargado completamente, estamos haciendo scroll sobre una página vacía o parcialmente renderizada. Los scrolls no fallan (JS no da error al hacer scrollBy sobre un body vacío), pero:
+
+1. **No simulan comportamiento humano real**: un humano no hace scroll si la página no ha cargado.
+2. **El delay posterior (paso 2) desperdicia tiempo**: estamos esperando después de scrollear la nada.
+3. **Anti-bot detection**: un servidor que correlacione eventos de scroll con estado de renderizado podría detectar scrolls sobre contenido no cargado como señal de automatización.
+
+### Solución propuesta
+
+Invertir el orden: primero verificar que el elemento existe, luego hacer scroll y delay:
+
+```python
+if not await esperar_elemento(cdp, ids[...]):
+    raise RuntimeError(...)
+await scroll_humano(cdp)
+await delay()
+await ejecutar_js(cdp, ...)
+```
+
+---
+
+## TD-16 — `asyncio.get_event_loop()` deprecado en `esperar_elemento`
+
+**Severidad:** Baja
+**Probabilidad:** Baja (funciona en Python 3.10-3.12, warning en 3.13+)
+**Ubicación:** `cita_bot.py:303-304`
+
+### Descripción
+
+```python
+inicio = asyncio.get_event_loop().time()
+while (asyncio.get_event_loop().time() - inicio) < timeout:
+```
+
+`asyncio.get_event_loop()` está deprecado desde Python 3.10 y emitirá `DeprecationWarning` en 3.12+. En Python 3.13+ podría ser removido. Además, se llama dos veces por iteración del loop de polling, lo cual es innecesario.
+
+### Solución propuesta
+
+Usar `time.monotonic()` que es más simple, no depende del event loop, y es más legible:
+
+```python
+import time
+
+inicio = time.monotonic()
+while (time.monotonic() - inicio) < timeout:
+```
+
+Alternativa: `asyncio.get_running_loop().time()` si se quiere mantener la semántica del event loop.
+
+---
+
+## TD-17 — Timeout de `esperar_elemento` hardcoded (10s)
+
+**Severidad:** Baja-Media
+**Probabilidad:** Baja (10s es razonable para la mayoría de cargas)
+**Ubicación:** `cita_bot.py:300`
+
+### Descripción
+
+```python
+async def esperar_elemento(cdp, element_id, timeout: float = 10.0) -> bool:
+```
+
+El timeout por defecto es 10s, hardcoded. Todos los demás tiempos del bot son configurables vía `.env` (`DELAY_ACCION_BASE`, `DELAY_SCROLL_MIN`, `DELAY_EVALUACION_MIN`, `TIMEOUT_CARGA_PAGINA_SEGUNDOS`, etc.). Este es el único timing que no se puede ajustar sin tocar el código.
+
+En conexiones lentas o portales congestionados, 10s podría ser insuficiente. En conexiones rápidas, 10s de espera antes de reportar error es excesivo y retrasa la detección de problemas reales.
+
+### Solución propuesta
+
+Añadir variable de entorno `TIMEOUT_ESPERA_ELEMENTO_SEGUNDOS` con default 10:
+
+```python
+TIMEOUT_ESPERA_ELEMENTO = float(os.getenv("TIMEOUT_ESPERA_ELEMENTO_SEGUNDOS", "10"))
+```
+
+Y usarla como default del parámetro:
+
+```python
+async def esperar_elemento(cdp, element_id, timeout: float = TIMEOUT_ESPERA_ELEMENTO):
+```
+
+---
+
 ## Ítems descartados
 
 Los siguientes ítems se documentan pero se descartan del plan de trabajo:
 
 - **TD-05 (Selección de pestaña):** Riesgo bajo, el uso esperado es con una sola pestaña.
-- **TD-06 (`asyncio.get_event_loop()` deprecado):** Funciona correctamente en el contexto actual. Se reevaluará si se migra a Python 3.13+.
+- **TD-06 (`asyncio.get_event_loop()` deprecado):** Subsumido por TD-16 que cubre el mismo problema en `esperar_elemento`.
 - **TD-07 (Detección de CAPTCHA):** Complejidad alta, fuera del alcance actual. Requeriría integración con servicios de resolución de CAPTCHA o flujo manual.
 - **TD-11 (Alerta en Linux):** El target principal es Windows. Se reevaluará si hay demanda.
