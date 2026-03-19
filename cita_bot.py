@@ -34,7 +34,7 @@ PASO_HASTA = int(os.getenv("PASO_HASTA", "5"))
 INTERVALO_REINTENTO = float(os.getenv("INTERVALO_REINTENTO_SEGUNDOS", "60"))
 TIMEOUT_PAGINA = float(os.getenv("TIMEOUT_CARGA_PAGINA_SEGUNDOS", "15"))
 
-# Delays configurables: cada uno con base y varianza (±%)
+# Delays configurables: cada uno con base + varianza aditiva
 # Acciones de formulario (click, select, etc.)
 DELAY_ACCION_BASE = float(os.getenv("DELAY_ACCION_BASE", "1.0"))
 DELAY_ACCION_VARIANZA = max(float(os.getenv("DELAY_ACCION_VARIANZA", "0.5")), 0.0)
