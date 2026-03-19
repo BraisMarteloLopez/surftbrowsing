@@ -48,6 +48,9 @@ DELAY_SCROLL_MAX = float(os.getenv("DELAY_SCROLL_MAX", "1.2"))
 DELAY_EVALUACION_MIN = float(os.getenv("DELAY_EVALUACION_MIN", "1.0"))
 DELAY_EVALUACION_MAX = float(os.getenv("DELAY_EVALUACION_MAX", "3.0"))
 
+# Timeout para esperar que un elemento aparezca en el DOM
+TIMEOUT_ESPERA_ELEMENTO = float(os.getenv("TIMEOUT_ESPERA_ELEMENTO_SEGUNDOS", "10"))
+
 CDP_PORT = 9222
 CDP_URL = f"http://localhost:{CDP_PORT}/json"
 
@@ -298,7 +301,7 @@ async def verificar_url(cdp: CDPSession, url_esperada: str) -> bool:
     return ok
 
 
-async def esperar_elemento(cdp: CDPSession, element_id: str, timeout: float = 10.0) -> bool:
+async def esperar_elemento(cdp: CDPSession, element_id: str, timeout: float = TIMEOUT_ESPERA_ELEMENTO) -> bool:
     """Espera hasta que un elemento exista en el DOM (polling cada 0.5s).
 
     Recibe el ID crudo (sin escapar). El escape se aplica internamente.
