@@ -127,7 +127,7 @@ NIE=TU_NIE_AQUI
 NOMBRE=TU NOMBRE Y APELLIDOS AQUI
 ```
 
-Opcionalmente se pueden ajustar los tiempos y el paso de inicio (ver sección 11.1 para todos los parámetros).
+Opcionalmente se pueden ajustar los tiempos y el paso de depuración (ver sección 11.1 para todos los parámetros).
 
 ### 5.5. Ejecutar el script
 
@@ -145,33 +145,30 @@ El script se conecta a Brave, abre el portal ICP y comienza el bucle de búsqued
 
 ## 6. Flujo detallado del bot
 
-### PASO 0 — Lanzamiento de Brave (manual, una sola vez)
+> **Nota:** La numeración de pasos (0-5) coincide con los valores de `PASO_HASTA` en `.env`. Esto permite hacer referencia cruzada entre este flujo y el modo depuración (ver sección 11.1).
 
-El usuario abre Brave desde línea de comandos con el flag de depuración remota (ver sección 5.2). Brave se abre normalmente. El flag solo habilita el puerto WebSocket de CDP.
+### Prerrequisito — Lanzamiento de Brave (manual, una sola vez)
 
-### PASO 1 — Conexión del script Python
+El usuario abre Brave desde línea de comandos con el flag de depuración remota (ver sección 5.2). Brave se abre normalmente. El flag solo habilita el puerto WebSocket de CDP. El script se conecta al WebSocket de Brave en `localhost:9222`. Si Brave no está abierto o no tiene el flag, el script muestra un error descriptivo y se cierra.
 
-El script se conecta al WebSocket de Brave en `localhost:9222`. Si Brave no está abierto o no tiene el flag, el script muestra un error descriptivo y se cierra.
+### PASO 0 — Navegación a la URL de inicio
 
-### PASO 2 — Navegación a la URL de inicio
-
-El script navega automáticamente a la URL de inicio del portal ICP.
-Espera a que la página cargue completamente antes de continuar.
+El script navega automáticamente a la URL de inicio del portal ICP. Espera a que la página cargue completamente y aplica zoom al 33% antes de continuar.
 
 > **URL:** `https://icp.administracionelectronica.gob.es/icpplus/index.html`
 
-### PASO 3 — Formulario 1: Selección de provincia
+### PASO 1 — Formulario 1: Selección de provincia
 
 Acciones JS ejecutadas por el script:
 
 1. Seleccionar "Madrid" en el dropdown de provincia → `getElementById('form').value = '/icpplustiem/citar?p=28&locale=es'`
 2. Disparar evento `change` → `getElementById('form').dispatchEvent(new Event('change', { bubbles: true }))`
 3. Click en botón "Aceptar" → `getElementById('btnAceptar').click()`
-4. Esperar carga de la siguiente página
+4. Esperar carga de la siguiente página + aplicar zoom 33%
 
 > **Nota:** El botón Aceptar ejecuta la función JS `envia()` al hacer click. Se usa `.click()` para que se dispare automáticamente.
 
-### PASO 4 — Formulario 2: Selección de oficina y trámite
+### PASO 2 — Formulario 2: Selección de oficina y trámite
 
 Acciones JS ejecutadas por el script:
 
@@ -179,20 +176,20 @@ Acciones JS ejecutadas por el script:
 2. Seleccionar trámite → `getElementById('tramiteGrupo[0]').value = '4112'`
 3. Disparar evento `change` → `getElementById('tramiteGrupo[0]').dispatchEvent(new Event('change', { bubbles: true }))`
 4. Click en botón "Aceptar" → `getElementById('btnAceptar').click()`
-5. Esperar carga de la siguiente página
+5. Esperar carga de la siguiente página + aplicar zoom 33%
 
 > **Nota:** El dropdown de trámite tiene `onchange` propio que llama a `eliminarSeleccionOtrosGrupos(0)` y `cargaMensajesTramite()`. El `dispatchEvent` los dispara automáticamente.
 
-### PASO 5 — Formulario 3: Aviso informativo
+### PASO 3 — Formulario 3: Aviso informativo
 
 Acciones JS ejecutadas por el script:
 
 1. Click en botón "Entrar" → `getElementById('btnEntrar').click()`
-2. Esperar carga de la siguiente página
+2. Esperar carga de la siguiente página + aplicar zoom 33%
 
 > **Nota:** El botón dice "Entrar" (no "Aceptar") y ejecuta `document.forms[0].submit()` al hacer click.
 
-### PASO 6 — Formulario 4: Datos personales
+### PASO 4 — Formulario 4: Datos personales
 
 Acciones JS ejecutadas por el script:
 
@@ -201,43 +198,36 @@ Acciones JS ejecutadas por el script:
 3. Rellenar campo Nombre y Apellidos → `getElementById('txtDesCitado').value = NOMBRE` (valor leído del `.env`)
 4. Disparar evento `change` → `getElementById('txtDesCitado').dispatchEvent(new Event('change', { bubbles: true }))`
 5. Click en botón "Aceptar" → `getElementById('btnEnviar').click()`
-6. Esperar carga de la siguiente página
+6. Esperar carga de la siguiente página + aplicar zoom 33%
 
 > **Nota:** El input Nombre tiene `onchange="comprobarDatos()"`, por lo que se dispara evento `change` (no `input`) para activar la validación.
 
-### PASO 7 — Formulario 5: Solicitar cita
+### PASO 5 — Formulario 5: Solicitar cita + comprobación de disponibilidad
 
 Acciones JS ejecutadas por el script:
 
 1. Click en botón "Solicitar Cita" → `getElementById('btnEnviar').click()`
-2. Esperar carga de la respuesta
+2. Esperar carga de la respuesta + aplicar zoom 33%
+3. Buscar en el contenido de la página el texto `En este momento no hay citas disponibles.`
 
 > **Nota:** El botón ejecuta `enviar('solicitud')` al hacer click. Se usa `.click()` para dispararlo.
 
-### PASO 8 — Comprobación de disponibilidad
-
-El script busca en el contenido de la página el texto de "no hay citas disponibles".
-
 **Si encuentra el mensaje (no hay cita):**
 
-1. El script espera el intervalo configurado (`intervalo_reintento_segundos`, por defecto 60 segundos)
-2. Hace click en el botón "Salir" de esa misma página → `getElementById('btnSalir').click()`
-3. Este botón ejecuta `goAc_opc_direct()` y devuelve al usuario a la URL de inicio del portal, manteniendo la sesión
-4. El script repite el proceso completo desde el PASO 3
-
-> **Nota:** El texto exacto de "no hay citas" es: `En este momento no hay citas disponibles.` (dentro de `<p class="mf-msg__info">` en `<div class="mf-main--content ac-custom-content">`).
+1. Hace click en el botón "Salir" → `getElementById('btnSalir').click()`
+2. Este botón ejecuta `goAc_opc_direct()` y devuelve al portal al inicio, manteniendo la sesión
+3. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS`, por defecto 60 segundos)
+4. Repite el proceso completo desde el PASO 0
 
 **Si NO encuentra el mensaje (hay cita disponible):**
 
 1. El script NO toca nada en la página. La deja exactamente en el estado en que está.
 2. Emite una alerta sonora repetida (bucle de sonido) para que el usuario la oiga aunque no esté delante del PC.
 3. Imprime en consola un mensaje destacado con timestamp.
-4. Entra en un bucle de mantenimiento de sesión: periódicamente (cada 30 segundos) ejecuta una acción mínima en la página (por ejemplo, leer un elemento del DOM) para evitar que la sesión del portal expire por inactividad.
+4. Entra en un bucle de mantenimiento de sesión: periódicamente (cada 30 segundos) lee `document.title` para evitar que la sesión del portal expire por inactividad.
 5. El bucle de mantenimiento + alerta continúa indefinidamente hasta que el usuario toma el control o para el script con Ctrl+C.
 
 El objetivo es que cuando el usuario llegue al navegador, la página esté exactamente donde el script la dejó, con la sesión activa, lista para que el usuario seleccione hora y confirme manualmente.
-
-> **Nota:** Verificar si la sesión del portal tiene timeout y cuánto es.
 
 ---
 
@@ -328,18 +318,16 @@ El flujo principal contempla dos estados después de solicitar cita:
 - "No hay citas disponibles" → reintentar
 - Cualquier otra cosa → asumir cita disponible y alertar
 
-En la práctica, la página puede mostrar otros estados:
+En la práctica, la página puede mostrar otros estados. El script los gestiona mediante tres niveles de error:
 
 | Estado | Causa probable | Comportamiento del script |
 |---|---|---|
-| Error del servidor (500, 503) | Portal caído o en mantenimiento | Detectar y reintentar tras espera |
-| Sesión expirada | Demasiado tiempo entre pasos | Detectar y reiniciar desde el PASO 2 |
-| Página en blanco o timeout | Conexión lenta o portal saturado | Timeout configurable; reiniciar desde PASO 2 |
-| CAPTCHA inesperado | Portal añade verificación nueva | Emitir alerta sonora; el usuario resuelve manualmente |
-| Elemento no encontrado | Portal cambió un ID | Log del error con el ID que falló; el script se detiene |
-| Texto inesperado en la página | Cambio en el portal | Log del contenido; emitir alerta; detenerse |
+| Timeout de carga | Conexión lenta o portal saturado | Log del timeout, espera 5s, reinicia ciclo desde PASO 0 |
+| Error JS (`RuntimeError`) | Elemento no encontrado / portal cambió un ID | Log del error con detalle, espera 10s, reinicia ciclo desde PASO 0 |
+| Cualquier otra excepción | Desconexión de Brave, error de red, etc. | Log del error, espera 10s, reinicia ciclo desde PASO 0 |
+| Texto inesperado (sin "no hay citas") | Página de error, CAPTCHA, cambio en el portal | El script lo interpreta como "cita disponible" y emite alerta sonora |
 
-El script debe manejar todos estos casos sin quedarse colgado. Si encuentra un estado que no reconoce, la acción por defecto es: log del estado, alerta sonora, detenerse.
+El script **nunca se detiene por un error**. Siempre reintenta desde el inicio del ciclo. El único caso donde el script alerta al usuario es cuando la página no contiene el mensaje de "no hay citas" — esto incluye tanto citas reales como estados inesperados. En ambos casos, lo correcto es que el usuario revise el navegador.
 
 ---
 
