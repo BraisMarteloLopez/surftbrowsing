@@ -15,7 +15,6 @@ import asyncio
 import json
 import os
 import sys
-import time
 import urllib.request
 from datetime import datetime
 
@@ -124,9 +123,20 @@ class CDPSession:
         await self._ws.send(json.dumps(payload))
         return await asyncio.wait_for(fut, timeout=TIMEOUT_PAGINA)
 
+    def pre_wait_event(self, event: str) -> asyncio.Future:
+        """Pre-registra un Future para un evento ANTES de que ocurra."""
+        fut = asyncio.get_event_loop().create_future()
+        self._events.setdefault(event, []).append(fut)
+        return fut
+
     async def wait_event(self, event: str, timeout: float | None = None):
         fut = asyncio.get_event_loop().create_future()
         self._events.setdefault(event, []).append(fut)
+        t = timeout if timeout is not None else TIMEOUT_PAGINA
+        return await asyncio.wait_for(fut, timeout=t)
+
+    async def wait_future(self, fut: asyncio.Future, timeout: float | None = None):
+        """Espera un Future pre-registrado con pre_wait_event."""
         t = timeout if timeout is not None else TIMEOUT_PAGINA
         return await asyncio.wait_for(fut, timeout=t)
 
@@ -159,15 +169,19 @@ async def aplicar_zoom(cdp: CDPSession) -> None:
 async def navegar(cdp: CDPSession, url: str) -> None:
     """Navega a una URL y espera a que cargue."""
     await cdp.send("Page.enable")
+    # Pre-registrar el Future ANTES de navegar para evitar race condition
+    load_fut = cdp.pre_wait_event("Page.loadEventFired")
     await cdp.send("Page.navigate", {"url": url})
-    await cdp.wait_event("Page.loadEventFired", timeout=TIMEOUT_PAGINA)
+    await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
     await aplicar_zoom(cdp)
 
 
-async def esperar_carga(cdp: CDPSession) -> None:
-    """Espera el evento de carga de página tras una navegación."""
+async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
+    """Pre-registra el evento de carga, hace click, y espera la carga."""
+    load_fut = cdp.pre_wait_event("Page.loadEventFired")
+    await ejecutar_js(cdp, js_click)
     try:
-        await cdp.wait_event("Page.loadEventFired", timeout=TIMEOUT_PAGINA)
+        await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
     except asyncio.TimeoutError:
         log("Timeout esperando carga de página, continuando...")
     await aplicar_zoom(cdp)
@@ -197,9 +211,8 @@ async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
     """)
 
     await delay()
-    await ejecutar_js(cdp, f"document.getElementById('{boton_id}').click();")
     log("Formulario 1: provincia seleccionada, esperando carga...")
-    await esperar_carga(cdp)
+    await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 
 async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
@@ -217,9 +230,8 @@ async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
     """)
 
     await delay()
-    await ejecutar_js(cdp, f"document.getElementById('{boton_id}').click();")
     log("Formulario 2: trámite seleccionado, esperando carga...")
-    await esperar_carga(cdp)
+    await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 
 async def paso_formulario_3(cdp: CDPSession, ids: dict) -> None:
@@ -228,9 +240,8 @@ async def paso_formulario_3(cdp: CDPSession, ids: dict) -> None:
     await delay()
 
     boton_id = ids["boton_entrar_f3"]
-    await ejecutar_js(cdp, f"document.getElementById('{boton_id}').click();")
     log("Formulario 3: aviso aceptado, esperando carga...")
-    await esperar_carga(cdp)
+    await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 
 async def paso_formulario_4(cdp: CDPSession, ids: dict) -> None:
@@ -258,9 +269,8 @@ async def paso_formulario_4(cdp: CDPSession, ids: dict) -> None:
     """)
 
     await delay()
-    await ejecutar_js(cdp, f"document.getElementById('{boton_id}').click();")
     log("Formulario 4: datos enviados, esperando carga...")
-    await esperar_carga(cdp)
+    await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 
 async def paso_formulario_5(cdp: CDPSession, ids: dict) -> None:
@@ -269,9 +279,8 @@ async def paso_formulario_5(cdp: CDPSession, ids: dict) -> None:
     await delay()
 
     boton_id = ids["boton_solicitar_cita"]
-    await ejecutar_js(cdp, f"document.getElementById('{boton_id}').click();")
     log("Formulario 5: cita solicitada, esperando respuesta...")
-    await esperar_carga(cdp)
+    await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 
 # ---------------------------------------------------------------------------
@@ -291,8 +300,7 @@ async def hay_cita_disponible(cdp: CDPSession, ids: dict) -> bool:
 async def click_salir(cdp: CDPSession, ids: dict) -> None:
     """Click en botón Salir de la página sin citas."""
     boton_id = ids["boton_salir_nocita"]
-    await ejecutar_js(cdp, f"document.getElementById('{boton_id}').click();")
-    await esperar_carga(cdp)
+    await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 
 # ---------------------------------------------------------------------------
@@ -303,10 +311,11 @@ async def alerta_sonora() -> None:
     """Emite alerta sonora en bucle. Usa winsound en Windows, beep del sistema en otros."""
     try:
         import winsound
+        loop = asyncio.get_event_loop()
         while True:
-            winsound.Beep(1000, 500)
-            winsound.Beep(1500, 500)
-            winsound.Beep(2000, 500)
+            await loop.run_in_executor(None, winsound.Beep, 1000, 500)
+            await loop.run_in_executor(None, winsound.Beep, 1500, 500)
+            await loop.run_in_executor(None, winsound.Beep, 2000, 500)
             await asyncio.sleep(1)
     except ImportError:
         # Linux/Mac: beep del sistema
