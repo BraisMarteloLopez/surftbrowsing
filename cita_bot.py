@@ -29,7 +29,7 @@ load_dotenv()
 
 NIE = os.getenv("NIE", "").strip()
 NOMBRE = os.getenv("NOMBRE", "").strip()
-PASO_INICIO = int(os.getenv("PASO_INICIO", "1"))
+PASO_HASTA = int(os.getenv("PASO_HASTA", "5"))
 INTERVALO_REINTENTO = float(os.getenv("INTERVALO_REINTENTO_SEGUNDOS", "60"))
 DELAY_ACCION = float(os.getenv("DELAY_ENTRE_ACCIONES_SEGUNDOS", "1.0"))
 TIMEOUT_PAGINA = float(os.getenv("TIMEOUT_CARGA_PAGINA_SEGUNDOS", "15"))
@@ -322,11 +322,11 @@ async def mantener_sesion(cdp: CDPSession) -> None:
 # Bucle principal
 # ---------------------------------------------------------------------------
 
-async def ciclo_completo(cdp: CDPSession, ids: dict, paso_inicio: int = 1) -> bool:
-    """Ejecuta un ciclo completo de formularios. Devuelve True si hay cita.
+async def ciclo_completo(cdp: CDPSession, ids: dict, paso_hasta: int = 5) -> bool | None:
+    """Ejecuta formularios desde el paso 0 hasta paso_hasta (inclusive).
 
-    Si paso_inicio > 1, salta los formularios anteriores. El navegador debe
-    estar ya posicionado en la página correspondiente al paso indicado.
+    Devuelve True si hay cita, False si no hay, o None si se detuvo antes
+    del paso 5 (modo depuración).
     """
     pasos = [
         (1, paso_formulario_1),
@@ -337,9 +337,9 @@ async def ciclo_completo(cdp: CDPSession, ids: dict, paso_inicio: int = 1) -> bo
     ]
 
     for num, fn in pasos:
-        if num < paso_inicio:
-            log(f"Saltando formulario {num} (PASO_INICIO={paso_inicio})")
-            continue
+        if num > paso_hasta:
+            log(f"Detenido en paso {paso_hasta} (PASO_HASTA={paso_hasta})")
+            return None
         await fn(cdp, ids)
 
     if await hay_cita_disponible(cdp, ids):
@@ -374,14 +374,14 @@ async def main() -> None:
     url_inicio = config["url_inicio"]
     ids = config["ids"]
 
-    if not 1 <= PASO_INICIO <= 5:
-        print(f"ERROR: PASO_INICIO debe ser entre 1 y 5, recibido: {PASO_INICIO}")
+    if not 0 <= PASO_HASTA <= 5:
+        print(f"ERROR: PASO_HASTA debe ser entre 0 y 5, recibido: {PASO_HASTA}")
         sys.exit(1)
 
     log_info(f"Configuración cargada — NIE: {NIE[:3]}*** / Nombre: {NOMBRE.split()[0]}***")
     log_info(f"Intervalo reintento: {INTERVALO_REINTENTO}s / Delay acciones: {DELAY_ACCION}s / Timeout: {TIMEOUT_PAGINA}s")
-    if PASO_INICIO > 1:
-        log_info(f"Modo depuración: empezando desde el paso {PASO_INICIO} (el navegador debe estar en esa página)")
+    if PASO_HASTA < 5:
+        log_info(f"Modo depuración: ejecutando pasos 0-{PASO_HASTA} y deteniendo (no entra en bucle)")
 
     # Conectar a Brave
     log_info("Conectando a Brave via CDP...")
@@ -400,18 +400,25 @@ async def main() -> None:
             _intento += 1
 
             try:
-                # Navegar al inicio (solo si empezamos desde el paso 1)
-                if PASO_INICIO == 1:
-                    log("Navegando a URL de inicio...")
-                    await navegar(cdp, url_inicio)
-                    log("Página cargada")
-                else:
-                    log(f"Saltando navegación inicial (PASO_INICIO={PASO_INICIO})")
+                # Paso 0: Navegar al inicio
+                log("Navegando a URL de inicio...")
+                await navegar(cdp, url_inicio)
+                log("Página cargada")
 
-                # Ciclo de formularios
-                cita_encontrada = await ciclo_completo(cdp, ids, PASO_INICIO)
+                if PASO_HASTA == 0:
+                    log("Detenido en paso 0 (PASO_HASTA=0) — solo navegación")
+                    log_info("Modo depuración finalizado.")
+                    return
 
-                if cita_encontrada:
+                # Pasos 1-5: Formularios
+                resultado = await ciclo_completo(cdp, ids, PASO_HASTA)
+
+                if resultado is None:
+                    # Modo depuración: se detuvo antes del paso 5
+                    log_info("Modo depuración finalizado.")
+                    return
+
+                if resultado:
                     print()
                     print("=" * 60)
                     log("*** CITA DISPONIBLE *** — Toma el control del navegador")

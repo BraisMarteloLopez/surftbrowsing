@@ -354,11 +354,10 @@ La configuración se divide en dos archivos:
 NIE=X1234567A
 NOMBRE=NOMBRE APELLIDO1 APELLIDO2
 
-# Depuración (OPCIONAL — empezar desde un paso concreto, 1-5)
-# Útil para depurar sin navegar todos los formularios desde el inicio.
-# El navegador debe estar ya en la página del paso indicado.
-# 1=Provincia, 2=Trámite, 3=Aviso, 4=Datos personales, 5=Solicitar cita
-PASO_INICIO=1
+# Depuración (OPCIONAL — ejecutar solo hasta un paso concreto, 0-5)
+# Siempre empieza desde el paso 0. Si es menor que 5, ejecuta una sola vez y para.
+# 0=Solo navegación, 1=Provincia, 2=Trámite, 3=Aviso, 4=Datos personales, 5=Ciclo completo
+PASO_HASTA=5
 
 # Cadencia (OPCIONAL — valores por defecto si no se especifican)
 INTERVALO_REINTENTO_SEGUNDOS=60
@@ -368,26 +367,31 @@ TIMEOUT_CARGA_PAGINA_SEGUNDOS=15
 
 El archivo `.env` NO se sube al repositorio (está en `.gitignore`). El usuario lo crea manualmente y rellena sus datos.
 
-El script valida al arrancar que `NIE` y `NOMBRE` existen y no están vacíos, y que `PASO_INICIO` está entre 1 y 5. Si alguna validación falla, muestra un error descriptivo y se cierra.
+El script valida al arrancar que `NIE` y `NOMBRE` existen y no están vacíos, y que `PASO_HASTA` está entre 0 y 5. Si alguna validación falla, muestra un error descriptivo y se cierra.
 
 | Variable | Obligatorio | Descripción | Valor por defecto |
 |---|---|---|---|
 | `NIE` | Sí | Número de identidad de extranjero | — |
 | `NOMBRE` | Sí | Nombre y apellidos completos | — |
-| `PASO_INICIO` | No | Paso desde el que empezar (1-5). Para depuración. | `1` |
+| `PASO_HASTA` | No | Paso hasta el que ejecutar (0-5). Para depuración. | `5` |
 | `INTERVALO_REINTENTO_SEGUNDOS` | No | Segundos entre reintentos cuando no hay cita | `60` |
 | `DELAY_ENTRE_ACCIONES_SEGUNDOS` | No | Segundos entre cada acción del formulario | `1.0` |
 | `TIMEOUT_CARGA_PAGINA_SEGUNDOS` | No | Timeout de espera de carga de página | `15` |
 
-#### Modo depuración con `PASO_INICIO`
+#### Modo depuración con `PASO_HASTA`
 
-Cuando `PASO_INICIO` es mayor que 1, el script:
+El script siempre empieza desde el paso 0 (navegación a la URL de inicio). `PASO_HASTA` controla hasta dónde llega:
 
-1. **No navega a la URL de inicio** — asume que el navegador ya está en la página correcta.
-2. **Salta los formularios anteriores** al paso indicado.
-3. **Ejecuta desde el paso indicado** en adelante con normalidad.
+| `PASO_HASTA` | Ejecuta | Comportamiento |
+|---|---|---|
+| `0` | Solo navegación a la URL | Ejecuta una vez y para |
+| `1` | Navegación + Formulario 1 (Provincia) | Ejecuta una vez y para |
+| `2` | Navegación + F1 + F2 (Trámite) | Ejecuta una vez y para |
+| `3` | Navegación + F1 + F2 + F3 (Aviso) | Ejecuta una vez y para |
+| `4` | Navegación + F1 + F2 + F3 + F4 (Datos) | Ejecuta una vez y para |
+| `5` | Ciclo completo (todos los pasos) | **Bucle infinito** — modo producción |
 
-Esto permite depurar pasos concretos sin interactuar con el portal real en los pasos previos. El usuario debe posicionar manualmente el navegador en la página del paso correspondiente antes de ejecutar el script.
+Cuando `PASO_HASTA < 5`, el script ejecuta los pasos indicados **una sola vez** y se detiene limpiamente. Esto permite verificar paso a paso que cada formulario funciona correctamente sin riesgo de efectos secundarios en el portal.
 
 ### 11.2. Archivo `config.json` — IDs de elementos HTML (no tocar)
 
