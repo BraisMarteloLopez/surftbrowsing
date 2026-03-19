@@ -333,7 +333,7 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
     if texto_check.get("value", False):
         # El texto "no hay citas" es la señal definitiva del estado.
         # El botón Salir puede tardar en renderizarse o haber cambiado de ID;
-        # click_salir() ya maneja su ausencia con fallback graceful.
+        # click_aceptar_nocita() ya maneja su ausencia con fallback graceful.
         return EstadoPagina.NO_HAY_CITAS
 
     # 5. Verificar que la URL pertenece al flujo del portal
@@ -361,21 +361,53 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
     return EstadoPagina.HAY_CITAS
 
 
-async def click_salir(cdp: CDPSession, ids: dict) -> bool:
-    """Click en botón Salir para volver al inicio via navegación orgánica del portal.
+async def click_aceptar_nocita(cdp: CDPSession) -> bool:
+    """Busca un botón con texto 'Salir' o 'Aceptar' y hace click para volver al inicio.
 
-    Nunca usa Page.navigate directo — el WAF valora la navegación a través
-    de los controles del portal. Si el botón no se encuentra (caso raro),
-    loguea advertencia y continúa; el siguiente ciclo intentará desde
-    la página actual.
+    El portal muestra textos diferentes según el contexto: "Salir" en navegación
+    manual y "Aceptar" en ciertos flujos. Buscamos ambos por texto visible,
+    priorizando "Salir" sobre "Aceptar". Usa navegación orgánica del portal
+    (nunca Page.navigate directo).
     """
-    boton_id = safe_js_string(ids["boton_salir_nocita"])
+    js_buscar_boton = """
+        (function() {
+            var botones = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
+            var fallback = null;
+            for (var i = 0; i < botones.length; i++) {
+                var texto = (botones[i].value || botones[i].textContent || '').toLowerCase().trim();
+                if (texto === 'salir') {
+                    botones[i].click();
+                    return 'salir';
+                }
+                if (texto === 'aceptar' && !fallback) {
+                    fallback = botones[i];
+                }
+            }
+            if (fallback) {
+                fallback.click();
+                return 'aceptar';
+            }
+            return false;
+        })();
+    """
+    load_fut = cdp.pre_wait_event("Page.loadEventFired")
+    result = await ejecutar_js(cdp, js_buscar_boton)
+    clicked = result.get("value", False)
 
-    if not await esperar_elemento(cdp, ids["boton_salir_nocita"]):
-        log("ADVERTENCIA: Botón Salir no encontrado")
+    if not clicked:
+        log("ADVERTENCIA: Botón Salir/Aceptar no encontrado en la página")
         return False
 
-    await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
+    log(f"Click en botón '{clicked}' para volver al inicio")
+
+    try:
+        await cdp.wait_future(load_fut, timeout=TIMEOUT_NAVEGACION)
+    except asyncio.TimeoutError:
+        log("Timeout esperando carga tras click, continuando...")
+
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF ha bloqueado la petición")
+
     return True
 
 
@@ -588,7 +620,7 @@ async def main() -> None:
                 backoff.registrar_exito()
                 waf_backoff.registrar_exito()
                 log("Resultado: NO HAY CITAS")
-                await click_salir(cdp, ids)
+                await click_aceptar_nocita(cdp)
                 skip_navegacion = True
                 # Limpiar caché y storage antes del siguiente ciclo
                 await limpiar_datos_navegador(cdp, url_inicio)

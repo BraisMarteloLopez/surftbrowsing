@@ -19,7 +19,7 @@ from comportamiento_humano import (
 from cita_bot import (
     EstadoPagina,
     navegar, click_y_esperar_carga, verificar_url,
-    esperar_elemento, click_salir,
+    esperar_elemento, click_aceptar_nocita,
     paso_formulario_1, paso_formulario_2, paso_formulario_3,
     paso_formulario_4, paso_formulario_5,
     ciclo_completo, evaluar_estado_pagina,
@@ -48,7 +48,6 @@ def ids():
         "input_nombre": "txtDesCitado",
         "boton_aceptar_f4": "btnEnviar",
         "boton_solicitar_cita": "btnEnviar",
-        "boton_salir_nocita": "btnSalir",
         "texto_no_hay_citas": "En este momento no hay citas disponibles.",
     }
 
@@ -163,30 +162,53 @@ class TestClickYEsperarCarga:
 
 
 # ---------------------------------------------------------------------------
-# click_salir
+# click_aceptar_nocita
 # ---------------------------------------------------------------------------
 
-class TestClickSalir:
+class TestClickAceptarNocita:
     @pytest.mark.asyncio
-    @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
-    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    async def test_click_salir_exito(self, mock_esperar, mock_click, ids):
+    @patch("cita_bot.detectar_waf", new_callable=AsyncMock, return_value=False)
+    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    async def test_click_salir_prioritario(self, mock_ejs, mock_waf):
+        """Prioriza botón 'Salir' sobre 'Aceptar'."""
         cdp = AsyncMock(spec=CDPSession)
-        result = await click_salir(cdp, ids)
+        load_fut = asyncio.get_running_loop().create_future()
+        load_fut.set_result({})
+        cdp.pre_wait_event.return_value = load_fut
+        mock_ejs.return_value = {"value": "salir"}
+
+        result = await click_aceptar_nocita(cdp)
         assert result is True
-        mock_esperar.assert_called_once()
-        js_code = mock_click.call_args[0][1]
-        assert "btnSalir" in js_code
+        js_code = mock_ejs.call_args[0][1]
+        assert "salir" in js_code.lower()
+        assert "aceptar" in js_code.lower()
 
     @pytest.mark.asyncio
-    @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
-    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=False)
-    async def test_click_salir_boton_no_encontrado(self, mock_esperar, mock_click, ids):
-        """Si botón Salir no existe, devuelve False sin intentar navegación."""
+    @patch("cita_bot.detectar_waf", new_callable=AsyncMock, return_value=False)
+    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    async def test_click_aceptar_fallback(self, mock_ejs, mock_waf):
+        """Si no hay 'Salir', usa 'Aceptar' como fallback."""
         cdp = AsyncMock(spec=CDPSession)
-        result = await click_salir(cdp, ids)
+        load_fut = asyncio.get_running_loop().create_future()
+        load_fut.set_result({})
+        cdp.pre_wait_event.return_value = load_fut
+        mock_ejs.return_value = {"value": "aceptar"}
+
+        result = await click_aceptar_nocita(cdp)
+        assert result is True
+
+    @pytest.mark.asyncio
+    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    async def test_click_no_encuentra_boton(self, mock_ejs):
+        """Si no hay botón con texto 'salir' ni 'aceptar', devuelve False."""
+        cdp = AsyncMock(spec=CDPSession)
+        load_fut = asyncio.get_running_loop().create_future()
+        load_fut.set_result({})
+        cdp.pre_wait_event.return_value = load_fut
+        mock_ejs.return_value = {"value": False}
+
+        result = await click_aceptar_nocita(cdp)
         assert result is False
-        mock_click.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

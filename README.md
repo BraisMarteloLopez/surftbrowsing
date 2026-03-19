@@ -278,7 +278,7 @@ La evaluación de la página combina múltiples verificaciones (detección WAF, 
 
 **Estado: NO HAY CITAS** (texto "no hay citas" confirmado — señal definitiva)
 
-1. Intenta hacer click en el botón "Salir" → `getElementById('btnSalir').click()`. Si falla, continúa igualmente.
+1. Busca un botón con texto "Aceptar" y hace click para volver al inicio. Si no lo encuentra, continúa igualmente.
 2. **Limpia caché y storage del navegador** (caché HTTP, localStorage, sessionStorage, IndexedDB, service workers). No borra cookies para no afectar la sesión.
 3. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS` ±15% jitter).
 4. Navega desde cero a la URL de inicio para iniciar un ciclo limpio.
@@ -475,7 +475,7 @@ Con estas señales, el script clasifica la página en cuatro estados:
 | Estado | Condiciones | Comportamiento |
 |---|---|---|
 | **WAF_BANEADO** | Página de rechazo del WAF (ambas señales: "URL was rejected" + "support ID") | Backoff agresivo de 5-15 min |
-| **NO HAY CITAS** | Texto "no hay citas" presente (señal definitiva) | Click en Salir, espera intervalo, reintenta |
+| **NO HAY CITAS** | Texto "no hay citas" presente (señal definitiva) | Click en Aceptar, espera intervalo, reintenta |
 | **HAY CITAS** | Sin texto negativo + URL válida + contenido suficiente (+ texto positivo si configurado) | Alerta sonora |
 | **DESCONOCIDO** | Página vacía, URL inesperada, o señales contradictorias | Log de advertencia, espera con backoff, reintenta |
 
@@ -587,7 +587,6 @@ Cuando `PASO_HASTA < 5`, el script ejecuta los pasos indicados **una sola vez** 
         "input_nombre": "txtDesCitado",
         "boton_aceptar_f4": "btnEnviar",
         "boton_solicitar_cita": "btnEnviar",
-        "boton_salir_nocita": "btnSalir",
         "texto_no_hay_citas": "En este momento no hay citas disponibles."
     }
 }
@@ -706,7 +705,7 @@ Todos los IDs de elementos han sido identificados y verificados:
 | F4 Datos | Input Nombre | `txtDesCitado` | `comprobarDatos()` |
 | F4 Datos | Botón Aceptar | `btnEnviar` | `envia()` |
 | F5 Solicitar | Botón Solicitar | `btnEnviar` | `enviar('solicitud')` |
-| No citas | Botón Salir | `btnSalir` | `goAc_opc_direct()` |
+| No citas | Botón (texto variable: "Salir"/"Aceptar") | búsqueda por texto | `goAc_opc_direct()` |
 
 URL de inicio: `https://icp.administracionelectronica.gob.es/icpplus/index.html`
 
