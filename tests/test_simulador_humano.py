@@ -125,7 +125,64 @@ class TestSimuladorHumanoEstado:
 
 
 # ---------------------------------------------------------------------------
-# Fase 5: Scroll nativo via mouseWheel
+# click_elemento: click CDP nativo + pausa focus
+# ---------------------------------------------------------------------------
+
+class TestClickElemento:
+    @pytest.mark.asyncio
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_click_elemento_envia_pressed_released(self, mock_sleep, mock_ejs):
+        """click_elemento envía mousePressed + mouseReleased CDP."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+        humano = SimuladorHumano(cdp)
+        mock_ejs.return_value = {"value": {"x": 300, "y": 150}}
+
+        await humano.click_elemento("txtInput")
+
+        mouse_calls = [c for c in cdp.send.call_args_list
+                       if c[0][0] == "Input.dispatchMouseEvent"]
+        tipos = [c[0][1]["type"] for c in mouse_calls]
+        assert "mousePressed" in tipos
+        assert "mouseReleased" in tipos
+
+    @pytest.mark.asyncio
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_click_elemento_pausa_tras_focus(self, mock_sleep, mock_ejs):
+        """click_elemento incluye pausa humana tras el click (focus duration)."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+        humano = SimuladorHumano(cdp)
+        mock_ejs.return_value = {"value": {"x": 300, "y": 150}}
+
+        await humano.click_elemento("txtInput")
+
+        # Última llamada a sleep debe ser la pausa de focus (0.4-1.2s)
+        last_sleep = mock_sleep.call_args_list[-1][0][0]
+        assert 0.4 <= last_sleep <= 1.2
+
+    @pytest.mark.asyncio
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_click_elemento_no_existe(self, mock_sleep, mock_ejs):
+        """Si el elemento no existe, no envía click ni pausa."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={})
+        humano = SimuladorHumano(cdp)
+        mock_ejs.return_value = {"value": None}
+
+        await humano.click_elemento("noExiste")
+
+        mouse_calls = [c for c in cdp.send.call_args_list
+                       if c[0][0] == "Input.dispatchMouseEvent"]
+        pressed = [c for c in mouse_calls if c[0][1].get("type") == "mousePressed"]
+        assert len(pressed) == 0
+
+
+# ---------------------------------------------------------------------------
+# Scroll nativo via mouseWheel
 # ---------------------------------------------------------------------------
 
 class TestSimuladorScroll:
@@ -429,23 +486,36 @@ class TestSecuenciaPreAccion:
             assert 2 <= total <= 5
 
     @pytest.mark.asyncio
-    async def test_secuencia_mueve_a_elemento_si_especificado(self):
-        """Si element_id se especifica, mover_a_elemento se llama al final."""
+    async def test_secuencia_mueve_a_elemento_sin_focus(self):
+        """Sin focus, mueve al elemento pero no hace click CDP."""
         humano = AsyncMock(spec=SimuladorHumano)
         real_method = SimuladorHumano.secuencia_pre_accion
 
-        await real_method(humano, element_id="myButton")
+        await real_method(humano, element_id="btnAceptar")
 
-        humano.mover_a_elemento.assert_called_once_with("myButton")
+        humano.mover_a_elemento.assert_called_once_with("btnAceptar")
+        humano.click_elemento.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_secuencia_click_elemento_con_focus(self):
+        """Con focus=True, hace click CDP nativo para generar focus isTrusted."""
+        humano = AsyncMock(spec=SimuladorHumano)
+        real_method = SimuladorHumano.secuencia_pre_accion
+
+        await real_method(humano, element_id="txtIdCitado", focus=True)
+
+        humano.click_elemento.assert_called_once_with("txtIdCitado")
+        humano.mover_a_elemento.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_secuencia_sin_element_id_no_mueve(self):
-        """Sin element_id, mover_a_elemento no se llama."""
+        """Sin element_id, ni click ni mover."""
         humano = AsyncMock(spec=SimuladorHumano)
         real_method = SimuladorHumano.secuencia_pre_accion
 
         await real_method(humano)
 
+        humano.click_elemento.assert_not_called()
         humano.mover_a_elemento.assert_not_called()
 
     @pytest.mark.asyncio

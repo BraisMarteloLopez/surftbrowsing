@@ -341,8 +341,8 @@ class SimuladorHumano:
         self.mouse_x = x_destino
         self.mouse_y = y_destino
 
-    async def mover_a_elemento(self, element_id: str) -> None:
-        """Obtiene posición del elemento y mueve el ratón hasta él."""
+    async def _obtener_posicion_elemento(self, element_id: str) -> dict | None:
+        """Obtiene posición central del elemento con variación aleatoria."""
         escaped = safe_js_string(element_id)
         result = await ejecutar_js(self.cdp, f"""
             (function() {{
@@ -357,7 +357,49 @@ class SimuladorHumano:
         """)
         pos = result.get("value")
         if pos and isinstance(pos, dict) and "x" in pos and "y" in pos:
+            return pos
+        return None
+
+    async def mover_a_elemento(self, element_id: str) -> None:
+        """Obtiene posición del elemento y mueve el ratón hasta él."""
+        pos = await self._obtener_posicion_elemento(element_id)
+        if pos:
             await self.mover_a(pos["x"], pos["y"])
+
+    async def click_elemento(self, element_id: str) -> None:
+        """Mueve el ratón al elemento, hace click CDP nativo, y pausa como un humano.
+
+        El click CDP (mousePressed + mouseReleased) genera eventos con
+        isTrusted=true, incluyendo focus nativo en el elemento. La pausa
+        posterior simula el tiempo que un humano tarda en leer el campo
+        antes de interactuar con él.
+        """
+        pos = await self._obtener_posicion_elemento(element_id)
+        if not pos:
+            return
+
+        await self.mover_a(pos["x"], pos["y"])
+
+        # Click CDP nativo: mousePressed + mouseReleased = focus isTrusted
+        try:
+            await self.cdp.send("Input.dispatchMouseEvent", {
+                "type": "mousePressed",
+                "x": pos["x"], "y": pos["y"],
+                "button": "left",
+                "clickCount": 1,
+            }, timeout=TIMEOUT_JS)
+            await asyncio.sleep(random.uniform(0.05, 0.15))
+            await self.cdp.send("Input.dispatchMouseEvent", {
+                "type": "mouseReleased",
+                "x": pos["x"], "y": pos["y"],
+                "button": "left",
+                "clickCount": 1,
+            }, timeout=TIMEOUT_JS)
+        except Exception:
+            pass
+
+        # Pausa humana: tiempo mirando el campo tras hacer focus
+        await asyncio.sleep(random.uniform(0.4, 1.2))
 
     async def movimiento_idle(self) -> None:
         """1-3 movimientos aleatorios por el viewport (simula lectura)."""
@@ -457,7 +499,8 @@ class SimuladorHumano:
 
     # --- Secuencia pre-acción con orden variable ---
 
-    async def secuencia_pre_accion(self, element_id: str | None = None) -> None:
+    async def secuencia_pre_accion(self, element_id: str | None = None,
+                                   focus: bool = False) -> None:
         """Ejecuta una secuencia pre-acción con orden variable.
 
         Elige aleatoriamente entre varias combinaciones de acciones
@@ -465,7 +508,10 @@ class SimuladorHumano:
         tengan exactamente el mismo patrón temporal.
 
         Siempre incluye al menos un delay_activo. Si se especifica
-        element_id, mueve el ratón al elemento al final.
+        element_id, mueve el ratón al elemento al final. Si focus=True,
+        hace click CDP nativo sobre el elemento (genera focus isTrusted=true
+        con pausa humana). Usar focus=True solo para inputs/selects, NO
+        para botones que ejecuten navegación.
         """
         acciones_posibles = [
             ("idle", lambda: self.movimiento_idle()),
@@ -483,7 +529,10 @@ class SimuladorHumano:
             await accion()
 
         if element_id:
-            await self.mover_a_elemento(element_id)
+            if focus:
+                await self.click_elemento(element_id)
+            else:
+                await self.mover_a_elemento(element_id)
 
     # --- Movimiento de fondo durante pausas ---
 

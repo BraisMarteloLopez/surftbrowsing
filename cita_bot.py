@@ -186,7 +186,7 @@ async def paso_formulario_1(humano: SimuladorHumano, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["dropdown_provincia"]):
         raise RuntimeError(f"Elemento #{ids['dropdown_provincia']} no apareció tras carga de página")
 
-    await humano.secuencia_pre_accion(element_id=ids["dropdown_provincia"])
+    await humano.secuencia_pre_accion(element_id=ids["dropdown_provincia"], focus=True)
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
         document.getElementById('{dropdown_id}').dispatchEvent(new Event('change', {{ bubbles: true }}));
@@ -209,7 +209,7 @@ async def paso_formulario_2(humano: SimuladorHumano, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["dropdown_tramite"]):
         raise RuntimeError(f"Elemento #{ids['dropdown_tramite']} no apareció tras carga de página")
 
-    await humano.secuencia_pre_accion(element_id=ids["dropdown_tramite"])
+    await humano.secuencia_pre_accion(element_id=ids["dropdown_tramite"], focus=True)
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
         document.getElementById('{dropdown_id}').dispatchEvent(new Event('change', {{ bubbles: true }}));
@@ -273,14 +273,14 @@ async def paso_formulario_4(humano: SimuladorHumano, ids: dict) -> None:
 
     # Orden aleatorio: a veces NIE primero, a veces nombre primero
     if random.random() < 0.5:
-        await humano.secuencia_pre_accion(element_id=ids["input_nie"])
+        await humano.secuencia_pre_accion(element_id=ids["input_nie"], focus=True)
         await _rellenar_campo_nie(cdp, input_nie)
-        await humano.secuencia_pre_accion(element_id=ids["input_nombre"])
+        await humano.secuencia_pre_accion(element_id=ids["input_nombre"], focus=True)
         await _rellenar_campo_nombre(cdp, input_nombre)
     else:
-        await humano.secuencia_pre_accion(element_id=ids["input_nombre"])
+        await humano.secuencia_pre_accion(element_id=ids["input_nombre"], focus=True)
         await _rellenar_campo_nombre(cdp, input_nombre)
-        await humano.secuencia_pre_accion(element_id=ids["input_nie"])
+        await humano.secuencia_pre_accion(element_id=ids["input_nie"], focus=True)
         await _rellenar_campo_nie(cdp, input_nie)
 
     await humano.secuencia_pre_accion(element_id=ids["boton_aceptar_f4"])

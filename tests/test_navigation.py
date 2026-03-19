@@ -215,9 +215,9 @@ class TestPasoFormulario1:
 
         mock_esperar.assert_called_once()
         assert mock_humano.secuencia_pre_accion.call_count == 2
-        # Primera secuencia: mover al dropdown
-        mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["dropdown_provincia"])
-        # Segunda secuencia: mover al botón
+        # Primera secuencia: focus en dropdown (input → focus=True)
+        mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["dropdown_provincia"], focus=True)
+        # Segunda secuencia: mover al botón (botón → sin focus)
         mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["boton_aceptar_f1"])
         js_code = mock_ejs.call_args[0][1]
         assert "form" in js_code
@@ -240,7 +240,7 @@ class TestPasoFormulario2:
 
         mock_esperar.assert_called_once()
         assert mock_humano.secuencia_pre_accion.call_count == 2
-        mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["dropdown_tramite"])
+        mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["dropdown_tramite"], focus=True)
         mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["boton_aceptar_f2"])
         js_code = mock_ejs.call_args[0][1]
         assert safe_js_string(ids["dropdown_tramite"]) in js_code
