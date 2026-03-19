@@ -1,7 +1,7 @@
 # Bot cita previa extranjería — POLICÍA TARJETA CONFLICTO UCRANIA (Madrid)
 
 **Fecha:** 18 de marzo de 2026
-**Estado:** Bloque A completado — Pendiente: datos personales (NIE + nombre)
+**Estado:** Mapeo completado — Listo para implementar
 
 ---
 
@@ -54,10 +54,10 @@ CDP sobre un navegador real no tiene este problema. El navegador es la instalaci
 - Windows 10/11
 - Python 3.10 o superior
 - Brave Browser instalado
-- Librería Python `websockets`:
+- Librerías Python:
 
 ```
-pip install websockets
+pip install websockets python-dotenv
 ```
 
 Ninguna otra dependencia.
@@ -118,7 +118,18 @@ Si CDP está activo, devuelve un JSON con la lista de pestañas abiertas. Ejempl
 
 Si devuelve error de conexión: Brave no se lanzó con el flag, o ya estaba corriendo antes de ejecutar el comando.
 
-### 5.4. Ejecutar el script
+### 5.4. Crear el archivo `.env`
+
+En la misma carpeta del script, crear un archivo llamado `.env` con el siguiente contenido:
+
+```env
+NIE=TU_NIE_AQUI
+NOMBRE=TU NOMBRE Y APELLIDOS AQUI
+```
+
+Opcionalmente se pueden ajustar los tiempos (ver sección 11.1 para todos los parámetros).
+
+### 5.5. Ejecutar el script
 
 ```
 python cita_bot.py
@@ -126,7 +137,7 @@ python cita_bot.py
 
 El script se conecta a Brave, abre el portal ICP y comienza el bucle de búsqueda de cita.
 
-### 5.5. Parar el script
+### 5.6. Parar el script
 
 `Ctrl+C` en la terminal. El script se cierra limpiamente. Brave queda abierto y sin afectar.
 
@@ -185,9 +196,9 @@ Acciones JS ejecutadas por el script:
 
 Acciones JS ejecutadas por el script:
 
-1. Rellenar campo NIE → `getElementById('txtIdCitado').value = 'X1234567A'`
+1. Rellenar campo NIE → `getElementById('txtIdCitado').value = NIE` (valor leído del `.env`)
 2. Disparar evento `input` → `getElementById('txtIdCitado').dispatchEvent(new Event('input', { bubbles: true }))`
-3. Rellenar campo Nombre y Apellidos → `getElementById('txtDesCitado').value = 'NOMBRE APELLIDO1 APELLIDO2'`
+3. Rellenar campo Nombre y Apellidos → `getElementById('txtDesCitado').value = NOMBRE` (valor leído del `.env`)
 4. Disparar evento `change` → `getElementById('txtDesCitado').dispatchEvent(new Event('change', { bubbles: true }))`
 5. Click en botón "Aceptar" → `getElementById('btnEnviar').click()`
 6. Esperar carga de la siguiente página
@@ -332,16 +343,32 @@ El script debe manejar todos estos casos sin quedarse colgado. Si encuentra un e
 
 ---
 
-## 11. Archivo de configuración (config.json)
+## 11. Configuración
+
+La configuración se divide en dos archivos:
+
+### 11.1. Archivo `.env` — Datos personales y cadencia (configurado por el usuario)
+
+```env
+# Datos personales (OBLIGATORIO — rellenar antes de ejecutar)
+NIE=X1234567A
+NOMBRE=NOMBRE APELLIDO1 APELLIDO2
+
+# Cadencia (OPCIONAL — valores por defecto si no se especifican)
+INTERVALO_REINTENTO_SEGUNDOS=60
+DELAY_ENTRE_ACCIONES_SEGUNDOS=1.0
+TIMEOUT_CARGA_PAGINA_SEGUNDOS=15
+```
+
+El archivo `.env` NO se sube al repositorio (está en `.gitignore`). El usuario lo crea manualmente y rellena sus datos.
+
+El script valida al arrancar que `NIE` y `NOMBRE` existen y no están vacíos. Si faltan, muestra un error descriptivo y se cierra.
+
+### 11.2. Archivo `config.json` — IDs de elementos HTML (no tocar)
 
 ```json
 {
     "url_inicio": "https://icp.administracionelectronica.gob.es/icpplus/index.html",
-    "nie": "X1234567A",
-    "nombre": "NOMBRE APELLIDO1 APELLIDO2",
-    "intervalo_reintento_segundos": 60,
-    "delay_entre_acciones_segundos": 1.0,
-    "timeout_carga_pagina_segundos": 15,
     "ids": {
         "dropdown_provincia": "form",
         "valor_madrid": "/icpplustiem/citar?p=28&locale=es",
@@ -360,7 +387,7 @@ El script debe manejar todos estos casos sin quedarse colgado. Si encuentra un e
 }
 ```
 
-Todos los IDs de elementos están externalizados. Si el portal cambia un ID, se edita una línea del JSON sin tocar el código Python.
+Los IDs de elementos HTML están externalizados. Si el portal cambia un ID, se edita una línea del JSON sin tocar el código Python. Este archivo SÍ se sube al repositorio.
 
 ---
 
@@ -425,16 +452,25 @@ Todos los IDs de elementos están externalizados. Si el portal cambia un ID, se 
 
 ---
 
-## 16. Próximo paso
+## 16. Resumen de mapeo de elementos HTML
 
-Recopilar los IDs de los elementos HTML de cada formulario. El usuario navega el portal con DevTools (F12) abiertas, inspecciona cada elemento interactivo, y proporciona el ID (atributo `id=""` del elemento HTML).
+Todos los IDs de elementos han sido identificados y verificados:
 
-Elementos pendientes por formulario:
+| Formulario | Elemento | ID | Evento/Función |
+|---|---|---|---|
+| F1 Provincia | Dropdown | `form` | — |
+| F1 Provincia | Botón Aceptar | `btnAceptar` | `envia()` |
+| F2 Trámite | Dropdown | `tramiteGrupo[0]` | `eliminarSeleccionOtrosGrupos(0)` |
+| F2 Trámite | Botón Aceptar | `btnAceptar` | `envia()` |
+| F3 Aviso | Botón Entrar | `btnEntrar` | `document.forms[0].submit()` |
+| F4 Datos | Input NIE | `txtIdCitado` | — |
+| F4 Datos | Input Nombre | `txtDesCitado` | `comprobarDatos()` |
+| F4 Datos | Botón Aceptar | `btnEnviar` | `envia()` |
+| F5 Solicitar | Botón Solicitar | `btnEnviar` | `enviar('solicitud')` |
+| No citas | Botón Salir | `btnSalir` | `goAc_opc_direct()` |
 
-- **Formulario 1:** ✅ dropdown `form`, valor Madrid `/icpplustiem/citar?p=28&locale=es`, botón `btnAceptar`
-- **Formulario 2:** ✅ dropdown `tramiteGrupo[0]`, valor `4112`, botón `btnAceptar`
-- **Formulario 3:** ✅ botón `btnEntrar`
-- **Formulario 4:** ✅ input NIE `txtIdCitado`, input nombre `txtDesCitado`, botón `btnEnviar`
-- **Formulario 5:** ✅ botón `btnEnviar`
-- **Página sin citas:** ✅ botón `btnSalir`, texto "En este momento no hay citas disponibles."
-- **General:** ✅ URL de inicio `https://icp.administracionelectronica.gob.es/icpplus/index.html`
+URL de inicio: `https://icp.administracionelectronica.gob.es/icpplus/index.html`
+
+## 17. Próximo paso
+
+Implementar `cita_bot.py`. El usuario debe crear su archivo `.env` con NIE y nombre antes de ejecutar (ver sección 5.4).

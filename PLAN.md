@@ -37,34 +37,38 @@ Antes de implementar, necesito que el usuario proporcione:
 
 3. **¿La página usa IDs estáticos o dinámicos?** (si cambian cada vez que recargas, hay que usar otro selector)
 
-### Bloque B — Datos personales
+### Bloque B — Datos personales y preferencias → archivo `.env`
 
-4. NIE del usuario (ej: X1234567A)
-5. Nombre completo tal como aparece en el formulario
+El usuario configura sus datos y preferencias en un archivo `.env` (no se sube al repo):
 
-### Bloque C — Preferencias
+```env
+NIE=X1234567A
+NOMBRE=NOMBRE APELLIDO1 APELLIDO2
+INTERVALO_REINTENTO_SEGUNDOS=60
+DELAY_ENTRE_ACCIONES_SEGUNDOS=1.0
+TIMEOUT_CARGA_PAGINA_SEGUNDOS=15
+```
 
-6. ¿Intervalo de reintento deseado? (default: 60s)
-7. ¿Delay entre acciones? (default: 1.0s)
-8. ¿Método de alerta sonora preferido? Opciones:
-   - `winsound.Beep` (solo Windows, sin dependencias extra)
-   - `playsound` (multiplataforma, requiere `pip install playsound`)
-   - Print en consola + beep del sistema (`\a`)
+- `NIE` y `NOMBRE` son obligatorios. El script valida al arrancar.
+- Los parámetros de cadencia son opcionales (tienen valores por defecto).
+- Dependencia adicional: `python-dotenv` para leer el `.env`.
 
 ---
 
-## Fase 1: Estructura base y config.json
+## Fase 1: Estructura base, config.json y .env
 
-**Archivos:** `config.json`, `cita_bot.py` (esqueleto)
+**Archivos:** `config.json`, `.env.example`, `.gitignore`, `cita_bot.py` (esqueleto)
 
 **Tareas:**
-- Crear `config.json` con los valores proporcionados por el usuario (o placeholders si aún no los tiene)
+- Crear `config.json` con URL de inicio e IDs de elementos HTML
+- Crear `.env.example` con plantilla de variables (NIE, NOMBRE, cadencia)
+- Crear/actualizar `.gitignore` para excluir `.env`
 - Crear esqueleto de `cita_bot.py` con:
-  - Carga de config.json
+  - Carga de `.env` con `python-dotenv`
+  - Carga de `config.json` para IDs
+  - Validación de variables obligatorias (NIE, NOMBRE)
   - Logging con formato timestamp + número de intento
   - Estructura main con manejo de Ctrl+C
-
-**Sin dependencias externas en esta fase.**
 
 ---
 
@@ -151,5 +155,7 @@ Antes de implementar, necesito que el usuario proporcione:
 
 | Archivo | Fase | Descripción |
 |---------|------|-------------|
-| `config.json` | 1 | Configuración externalizada |
+| `config.json` | 1 | URL de inicio + IDs de elementos HTML |
+| `.env.example` | 1 | Plantilla para que el usuario cree su `.env` |
+| `.gitignore` | 1 | Excluye `.env` del repositorio |
 | `cita_bot.py` | 1-5 | Script principal del bot |
