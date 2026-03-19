@@ -10,17 +10,19 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cdp_helpers import CDPSession, ejecutar_js, safe_js_string
-from cita_bot import (
-    EstadoPagina, WafBanError,
-    navegar, click_y_esperar_carga, scroll_humano, verificar_url,
-    esperar_elemento, click_salir, delay, pausa_entre_pasos,
-    limpiar_datos_navegador,
+from comportamiento_humano import (
+    WafBanError,
     mover_raton, movimiento_raton_aleatorio, mover_raton_a_elemento,
-    pausa_extra_aleatoria,
+    scroll_humano, delay, pausa_entre_pasos, pausa_extra_aleatoria,
+    intervalo_con_jitter, detectar_waf, limpiar_datos_navegador,
+)
+from cita_bot import (
+    EstadoPagina,
+    navegar, click_y_esperar_carga, verificar_url,
+    esperar_elemento, click_salir,
     paso_formulario_1, paso_formulario_2, paso_formulario_3,
     paso_formulario_4, paso_formulario_5,
-    ciclo_completo, evaluar_estado_pagina, detectar_waf,
-    intervalo_con_jitter,
+    ciclo_completo, evaluar_estado_pagina,
 )
 
 
@@ -49,9 +51,9 @@ def ids():
 
 class TestScrollHumano:
     @pytest.mark.asyncio
-    @patch("cita_bot.random.randint", return_value=3)
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.random.randint", return_value=3)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
     async def test_scroll_ejecuta_pasos_aleatorios(self, mock_ejs, mock_sleep, mock_randint):
         cdp = AsyncMock(spec=CDPSession)
         await scroll_humano(cdp)
@@ -63,8 +65,8 @@ class TestScrollHumano:
             assert "smooth" in js_code
 
     @pytest.mark.asyncio
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
     async def test_scroll_pasos_entre_2_y_4(self, mock_ejs, mock_sleep):
         """scroll_humano ejecuta entre 2 y 4 pasos."""
         cdp = AsyncMock(spec=CDPSession)
@@ -517,8 +519,8 @@ class TestEjecutarJs:
 
 class TestMoverRaton:
     @pytest.mark.asyncio
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
     async def test_mover_raton_envia_mouse_moved(self, mock_ejs, mock_sleep):
         """mover_raton envía eventos mouseMoved al CDP."""
         cdp = AsyncMock(spec=CDPSession)
@@ -539,8 +541,8 @@ class TestMoverRaton:
             assert mc[0][1]["type"] == "mouseMoved"
 
     @pytest.mark.asyncio
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
     async def test_mover_raton_no_crashea_si_cdp_falla(self, mock_ejs, mock_sleep):
         """Si CDP falla al enviar mouseMoved, retorna sin error."""
         cdp = AsyncMock(spec=CDPSession)
@@ -551,8 +553,8 @@ class TestMoverRaton:
         await mover_raton(cdp, 500, 300, pasos=2)
 
     @pytest.mark.asyncio
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
     async def test_mover_raton_guarda_posicion_final(self, mock_ejs, mock_sleep):
         """mover_raton guarda la posición final en window.__mouse_pos."""
         cdp = AsyncMock(spec=CDPSession)
@@ -577,9 +579,9 @@ class TestMoverRaton:
 
 class TestMovimientoRatonAleatorio:
     @pytest.mark.asyncio
-    @patch("cita_bot.mover_raton", new_callable=AsyncMock)
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.mover_raton", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
     async def test_realiza_movimientos(self, mock_ejs, mock_sleep, mock_mover):
         """movimiento_raton_aleatorio realiza entre 1 y 3 movimientos."""
         cdp = AsyncMock(spec=CDPSession)
@@ -596,8 +598,8 @@ class TestMovimientoRatonAleatorio:
 
 class TestMoverRatonAElemento:
     @pytest.mark.asyncio
-    @patch("cita_bot.mover_raton", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.mover_raton", new_callable=AsyncMock)
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
     async def test_mueve_a_centro_del_elemento(self, mock_ejs, mock_mover):
         """Mueve el ratón al centro del elemento encontrado."""
         cdp = AsyncMock(spec=CDPSession)
@@ -608,8 +610,8 @@ class TestMoverRatonAElemento:
         mock_mover.assert_called_once_with(cdp, 400, 200)
 
     @pytest.mark.asyncio
-    @patch("cita_bot.mover_raton", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("comportamiento_humano.mover_raton", new_callable=AsyncMock)
+    @patch("comportamiento_humano.ejecutar_js", new_callable=AsyncMock)
     async def test_no_mueve_si_elemento_no_existe(self, mock_ejs, mock_mover):
         """Si el elemento no existe, no intenta mover el ratón."""
         cdp = AsyncMock(spec=CDPSession)
@@ -626,16 +628,16 @@ class TestMoverRatonAElemento:
 
 class TestPausaExtraAleatoria:
     @pytest.mark.asyncio
-    @patch("cita_bot.random.random", return_value=0.1)
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.random.random", return_value=0.1)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
     async def test_pausa_ocurre_cuando_random_bajo(self, mock_sleep, mock_rand):
         """Con random() = 0.1 (< 0.3), debe hacer pausa."""
         await pausa_extra_aleatoria()
         mock_sleep.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("cita_bot.random.random", return_value=0.5)
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.random.random", return_value=0.5)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
     async def test_no_pausa_cuando_random_alto(self, mock_sleep, mock_rand):
         """Con random() = 0.5 (>= 0.3), no debe hacer pausa."""
         await pausa_extra_aleatoria()

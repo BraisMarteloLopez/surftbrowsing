@@ -10,7 +10,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cdp_helpers import CDPSession
-from cita_bot import EstadoPagina, evaluar_estado_pagina, detectar_waf, WafBanError
+from comportamiento_humano import detectar_waf, WafBanError
+from cita_bot import EstadoPagina, evaluar_estado_pagina
 
 
 def _make_ejecutar_js_mock(responses: list[dict]):
@@ -220,7 +221,7 @@ async def test_texto_positivo_vacio_no_afecta(mock_sleep, mock_ejs):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-@patch("cita_bot.ejecutar_js")
+@patch("comportamiento_humano.ejecutar_js")
 async def test_detectar_waf_pagina_rechazo(mock_ejs):
     """Página con 'The requested URL was rejected' → True."""
     cdp = AsyncMock(spec=CDPSession)
@@ -231,7 +232,7 @@ async def test_detectar_waf_pagina_rechazo(mock_ejs):
 
 
 @pytest.mark.asyncio
-@patch("cita_bot.ejecutar_js")
+@patch("comportamiento_humano.ejecutar_js")
 async def test_detectar_waf_solo_support_id_no_es_waf(mock_ejs):
     """Solo 'Your support ID' sin 'URL was rejected' → False (requiere ambas señales)."""
     cdp = AsyncMock(spec=CDPSession)
@@ -242,7 +243,7 @@ async def test_detectar_waf_solo_support_id_no_es_waf(mock_ejs):
 
 
 @pytest.mark.asyncio
-@patch("cita_bot.ejecutar_js")
+@patch("comportamiento_humano.ejecutar_js")
 async def test_detectar_waf_solo_url_rejected_no_es_waf(mock_ejs):
     """Solo 'URL was rejected' sin 'support ID' → False (requiere ambas señales)."""
     cdp = AsyncMock(spec=CDPSession)
@@ -253,7 +254,7 @@ async def test_detectar_waf_solo_url_rejected_no_es_waf(mock_ejs):
 
 
 @pytest.mark.asyncio
-@patch("cita_bot.ejecutar_js")
+@patch("comportamiento_humano.ejecutar_js")
 async def test_detectar_waf_pagina_cita_no_es_waf(mock_ejs):
     """Página real del portal con cita disponible → False."""
     cdp = AsyncMock(spec=CDPSession)
@@ -264,7 +265,7 @@ async def test_detectar_waf_pagina_cita_no_es_waf(mock_ejs):
 
 
 @pytest.mark.asyncio
-@patch("cita_bot.ejecutar_js")
+@patch("comportamiento_humano.ejecutar_js")
 async def test_detectar_waf_pagina_normal(mock_ejs):
     """Página normal del portal → False."""
     cdp = AsyncMock(spec=CDPSession)
@@ -275,7 +276,7 @@ async def test_detectar_waf_pagina_normal(mock_ejs):
 
 
 @pytest.mark.asyncio
-@patch("cita_bot.ejecutar_js")
+@patch("comportamiento_humano.ejecutar_js")
 async def test_detectar_waf_pagina_vacia(mock_ejs):
     """Página vacía → False."""
     cdp = AsyncMock(spec=CDPSession)
@@ -284,7 +285,7 @@ async def test_detectar_waf_pagina_vacia(mock_ejs):
 
 
 @pytest.mark.asyncio
-@patch("cita_bot.ejecutar_js")
+@patch("comportamiento_humano.ejecutar_js")
 async def test_detectar_waf_error_js(mock_ejs):
     """Error en ejecutar_js → False (no crashea)."""
     cdp = AsyncMock(spec=CDPSession)
