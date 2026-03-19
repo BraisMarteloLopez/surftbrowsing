@@ -16,6 +16,7 @@ import json
 import os
 import random
 import sys
+import time
 import urllib.request
 from datetime import datetime
 from enum import Enum
@@ -221,7 +222,7 @@ class CDPSession:
         if params:
             payload["params"] = params
 
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self._callbacks[msg_id] = fut
         await self._ws.send(json.dumps(payload))
         t = timeout if timeout is not None else TIMEOUT_PAGINA
@@ -231,12 +232,12 @@ class CDPSession:
         """Pre-registra un Future para un evento ANTES de que ocurra."""
         if not self._alive:
             raise ConnectionError("Sesión CDP desconectada")
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self._events.setdefault(event, []).append(fut)
         return fut
 
     async def wait_event(self, event: str, timeout: float | None = None):
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self._events.setdefault(event, []).append(fut)
         t = timeout if timeout is not None else TIMEOUT_PAGINA
         return await asyncio.wait_for(fut, timeout=t)
@@ -303,8 +304,8 @@ async def esperar_elemento(cdp: CDPSession, element_id: str, timeout: float = 10
     Recibe el ID crudo (sin escapar). El escape se aplica internamente.
     """
     escaped = safe_js_string(element_id)
-    inicio = asyncio.get_event_loop().time()
-    while (asyncio.get_event_loop().time() - inicio) < timeout:
+    inicio = time.monotonic()
+    while (time.monotonic() - inicio) < timeout:
         result = await ejecutar_js(cdp, f"document.getElementById('{escaped}') !== null;")
         if result.get("value", False):
             return True
@@ -515,7 +516,7 @@ async def alerta_sonora() -> None:
     """Emite alerta sonora en bucle. Usa winsound en Windows, beep del sistema en otros."""
     try:
         import winsound
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         while True:
             await loop.run_in_executor(None, winsound.Beep, 1000, 500)
             await loop.run_in_executor(None, winsound.Beep, 1500, 500)

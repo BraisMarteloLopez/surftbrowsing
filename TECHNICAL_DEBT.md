@@ -24,7 +24,7 @@
 | TD-13 | `esperar_elemento` escapa IDs redundantemente | Baja-Media | Baja | **Resuelto** |
 | TD-14 | `click_salir` lanza RuntimeError en vez de tolerar fallos | Media | Media | **Resuelto** |
 | TD-15 | `scroll_humano` se ejecuta antes de verificar que la página cargó | Media | Media-Alta | **Resuelto** |
-| TD-16 | `asyncio.get_event_loop()` deprecado en `esperar_elemento` | Baja | Baja | Pendiente |
+| TD-16 | `asyncio.get_event_loop()` deprecado en `esperar_elemento` | Baja | Baja | **Resuelto** |
 | TD-17 | Timeout de `esperar_elemento` hardcoded (10s) | Baja-Media | Baja | Pendiente |
 
 ---
