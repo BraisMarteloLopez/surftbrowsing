@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cita_bot import (
     CDPSession, EstadoPagina,
     navegar, click_y_esperar_carga, scroll_humano, verificar_url,
-    click_salir, delay,
+    esperar_elemento, click_salir, delay,
     paso_formulario_1, paso_formulario_2, paso_formulario_3,
     paso_formulario_4, paso_formulario_5,
     ciclo_completo, evaluar_estado_pagina,
@@ -205,17 +205,41 @@ class TestPasoFormulario3:
 # paso_formulario_4
 # ---------------------------------------------------------------------------
 
+class TestEsperarElemento:
+    @pytest.mark.asyncio
+    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    async def test_elemento_existe_inmediatamente(self, mock_ejs, mock_sleep):
+        cdp = AsyncMock(spec=CDPSession)
+        mock_ejs.return_value = {"value": True}
+        result = await esperar_elemento(cdp, "myId")
+        assert result is True
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    async def test_elemento_aparece_tras_reintentos(self, mock_ejs, mock_sleep):
+        cdp = AsyncMock(spec=CDPSession)
+        mock_ejs.side_effect = [{"value": False}, {"value": False}, {"value": True}]
+        result = await esperar_elemento(cdp, "myId")
+        assert result is True
+        assert mock_sleep.call_count == 2
+
+
 class TestPasoFormulario4:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
     @patch("cita_bot.delay", new_callable=AsyncMock)
     @patch("cita_bot.NIE", "X1234567A")
     @patch("cita_bot.NOMBRE", "JUAN GARCÍA")
-    async def test_formulario_4_rellena_datos(self, mock_delay, mock_ejs, mock_click, ids):
+    async def test_formulario_4_rellena_datos(self, mock_delay, mock_esperar, mock_ejs, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_4(cdp, ids)
 
+        mock_esperar.assert_called_once()
         # 2 llamadas a ejecutar_js: NIE + Nombre
         assert mock_ejs.call_count == 2
         nie_js = mock_ejs.call_args_list[0][0][1]
@@ -228,15 +252,26 @@ class TestPasoFormulario4:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
     @patch("cita_bot.delay", new_callable=AsyncMock)
     @patch("cita_bot.NIE", "X1234567A")
     @patch("cita_bot.NOMBRE", "O'BRIEN TEST")
-    async def test_formulario_4_escapa_nombre_con_comilla(self, mock_delay, mock_ejs, mock_click, ids):
+    async def test_formulario_4_escapa_nombre_con_comilla(self, mock_delay, mock_esperar, mock_ejs, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_4(cdp, ids)
 
         nombre_js = mock_ejs.call_args_list[1][0][1]
         assert "O\\'BRIEN TEST" in nombre_js
+
+    @pytest.mark.asyncio
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=False)
+    @patch("cita_bot.delay", new_callable=AsyncMock)
+    @patch("cita_bot.NIE", "X1234567A")
+    @patch("cita_bot.NOMBRE", "TEST")
+    async def test_formulario_4_falla_si_elemento_no_aparece(self, mock_delay, mock_esperar, ids):
+        cdp = AsyncMock(spec=CDPSession)
+        with pytest.raises(RuntimeError, match="no apareció"):
+            await paso_formulario_4(cdp, ids)
 
 
 # ---------------------------------------------------------------------------

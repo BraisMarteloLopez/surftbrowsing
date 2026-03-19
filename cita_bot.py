@@ -37,7 +37,7 @@ TIMEOUT_PAGINA = float(os.getenv("TIMEOUT_CARGA_PAGINA_SEGUNDOS", "15"))
 # Delays configurables: cada uno con base y varianza (±%)
 # Acciones de formulario (click, select, etc.)
 DELAY_ACCION_BASE = float(os.getenv("DELAY_ACCION_BASE", "1.0"))
-DELAY_ACCION_VARIANZA = float(os.getenv("DELAY_ACCION_VARIANZA", "0.5"))
+DELAY_ACCION_VARIANZA = max(float(os.getenv("DELAY_ACCION_VARIANZA", "0.5")), 0.0)
 
 # Scroll humano entre pasos de scroll
 DELAY_SCROLL_MIN = float(os.getenv("DELAY_SCROLL_MIN", "0.4"))
@@ -297,6 +297,19 @@ async def verificar_url(cdp: CDPSession, url_esperada: str) -> bool:
     return ok
 
 
+async def esperar_elemento(cdp: CDPSession, element_id: str, timeout: float = 10.0) -> bool:
+    """Espera hasta que un elemento exista en el DOM (polling cada 0.5s)."""
+    escaped = safe_js_string(element_id)
+    inicio = asyncio.get_event_loop().time()
+    while (asyncio.get_event_loop().time() - inicio) < timeout:
+        result = await ejecutar_js(cdp, f"document.getElementById('{escaped}') !== null;")
+        if result.get("value", False):
+            return True
+        await asyncio.sleep(0.5)
+    log(f"Timeout esperando elemento #{element_id} ({timeout}s)")
+    return False
+
+
 async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
     """Pre-registra el evento de carga, hace click, y espera la carga."""
     load_fut = cdp.pre_wait_event("Page.loadEventFired")
@@ -309,9 +322,8 @@ async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
 
 async def delay() -> None:
     """Pausa aleatoria entre acciones para simular comportamiento humano."""
-    minimo = DELAY_ACCION_BASE * (1 - DELAY_ACCION_VARIANZA)
-    maximo = DELAY_ACCION_BASE * (1 + DELAY_ACCION_VARIANZA)
-    await asyncio.sleep(random.uniform(minimo, maximo))
+    extra = DELAY_ACCION_BASE * random.uniform(0, DELAY_ACCION_VARIANZA)
+    await asyncio.sleep(DELAY_ACCION_BASE + extra)
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +389,10 @@ async def paso_formulario_4(cdp: CDPSession, ids: dict) -> None:
     input_nie = safe_js_string(ids["input_nie"])
     input_nombre = safe_js_string(ids["input_nombre"])
     boton_id = safe_js_string(ids["boton_aceptar_f4"])
+
+    # Esperar a que el formulario esté disponible tras la carga
+    if not await esperar_elemento(cdp, ids["input_nie"]):
+        raise RuntimeError(f"Elemento #{ids['input_nie']} no apareció tras carga de página")
 
     # NIE
     nie_escaped = safe_js_string(NIE)
@@ -563,7 +579,7 @@ async def main() -> None:
         sys.exit(1)
 
     log_info(f"Configuración cargada — NIE: {NIE[:3]}*** / Nombre: {NOMBRE.split()[0]}***")
-    log_info(f"Intervalo reintento: {INTERVALO_REINTENTO}s / Delay acciones: {DELAY_ACCION_BASE}s±{DELAY_ACCION_VARIANZA*100:.0f}% / Timeout: {TIMEOUT_PAGINA}s")
+    log_info(f"Intervalo reintento: {INTERVALO_REINTENTO}s / Delay acciones: {DELAY_ACCION_BASE}s+[0-{DELAY_ACCION_VARIANZA*100:.0f}%] / Timeout: {TIMEOUT_PAGINA}s")
     if PASO_HASTA < 5:
         log_info(f"Modo depuración: ejecutando pasos 0-{PASO_HASTA} y deteniendo (no entra en bucle)")
 
