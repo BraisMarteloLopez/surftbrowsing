@@ -14,6 +14,7 @@ Requisitos:
 import asyncio
 import json
 import os
+import random
 import sys
 import urllib.request
 from datetime import datetime
@@ -37,10 +38,9 @@ TIMEOUT_PAGINA = float(os.getenv("TIMEOUT_CARGA_PAGINA_SEGUNDOS", "15"))
 CDP_PORT = 9222
 CDP_URL = f"http://localhost:{CDP_PORT}/json"
 
-# Timeouts diferenciados (Fase 7 — TD-12)
+# Timeouts diferenciados
 TIMEOUT_NAVEGACION = TIMEOUT_PAGINA  # 15s — para Page.navigate + load
 TIMEOUT_JS = 5.0                     # 5s — para Runtime.evaluate simples
-TIMEOUT_KEEPALIVE = 3.0              # 3s — para operaciones de keep-alive
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +295,12 @@ async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
 
 
 async def delay() -> None:
-    """Pausa entre acciones para simular comportamiento humano."""
-    await asyncio.sleep(DELAY_ACCION)
+    """Pausa aleatoria entre acciones para simular comportamiento humano."""
+    # ±50% del valor configurado: si DELAY_ACCION=5, rango [2.5, 7.5]
+    minimo = DELAY_ACCION * 0.5
+    maximo = DELAY_ACCION * 1.5
+    espera = random.uniform(minimo, maximo)
+    await asyncio.sleep(espera)
 
 
 # ---------------------------------------------------------------------------
@@ -468,19 +472,9 @@ async def alerta_sonora() -> None:
             await asyncio.sleep(1)
 
 
-async def mantener_sesion(cdp: CDPSession) -> None:
-    """Keep-alive: genera tráfico HTTP real cada 30s para mantener sesión server-side."""
-    while True:
-        try:
-            await ejecutar_js(cdp, """
-                fetch(window.location.href, {
-                    method: 'HEAD',
-                    credentials: 'same-origin'
-                }).catch(function(){});
-            """, timeout=TIMEOUT_KEEPALIVE)
-        except Exception:
-            pass
-        await asyncio.sleep(30)
+def intervalo_con_jitter(base: float) -> float:
+    """Aplica ±15% de jitter a un intervalo para evitar cadencia periódica."""
+    return base * random.uniform(0.85, 1.15)
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +564,8 @@ async def main() -> None:
         umbral_alerta=10,
     )
 
+    skip_navegacion = False
+
     while True:
         _intento += 1
 
@@ -577,6 +573,7 @@ async def main() -> None:
             # Verificar conexión CDP antes de cada ciclo
             if not cdp.is_alive:
                 log("Conexión CDP perdida. Reconectando...")
+                skip_navegacion = False
                 try:
                     await ws.close()
                 except Exception:
@@ -585,19 +582,23 @@ async def main() -> None:
                 ws, cdp = await conectar_brave()
                 log_info("Reconexión exitosa.")
 
-            # Paso 0: Navegar al inicio
-            log("Navegando a URL de inicio...")
-            await navegar(cdp, url_inicio)
+            # Paso 0: Navegar al inicio (se salta si Salir ya nos devolvió)
+            if skip_navegacion:
+                log("Reutilizando sesión del portal (sin navegación extra)")
+                skip_navegacion = False
+            else:
+                log("Navegando a URL de inicio...")
+                await navegar(cdp, url_inicio)
 
-            # Verificar que la navegación llegó al destino correcto
-            if not await verificar_url(cdp, url_inicio):
-                log("ADVERTENCIA: URL post-navegación no coincide con el inicio.")
-                espera = backoff.registrar_error("navegacion")
-                log(f"Reiniciando ciclo en {espera:.0f}s...")
-                await asyncio.sleep(espera)
-                continue
+                # Verificar que la navegación llegó al destino correcto
+                if not await verificar_url(cdp, url_inicio):
+                    log("ADVERTENCIA: URL post-navegación no coincide con el inicio.")
+                    espera = backoff.registrar_error("navegacion")
+                    log(f"Reiniciando ciclo en {espera:.0f}s...")
+                    await asyncio.sleep(espera)
+                    continue
 
-            log("Página cargada")
+                log("Página cargada")
 
             if PASO_HASTA == 0:
                 log("Detenido en paso 0 (PASO_HASTA=0) — solo navegación")
@@ -620,20 +621,20 @@ async def main() -> None:
                 print("=" * 60)
                 print()
 
-                # Mantener sesión + alerta en paralelo
-                await asyncio.gather(
-                    alerta_sonora(),
-                    mantener_sesion(cdp),
-                )
+                # Solo alerta sonora — sin keep-alive para no generar tráfico
+                await alerta_sonora()
             elif resultado == EstadoPagina.NO_HAY_CITAS:
                 backoff.registrar_exito()
                 log("Resultado: NO HAY CITAS")
-                log(f"Reintentando en {INTERVALO_REINTENTO}s...")
                 try:
                     await click_salir(cdp, ids)
+                    # Salir nos devuelve al inicio del portal — no navegar de nuevo
+                    skip_navegacion = True
                 except (RuntimeError, asyncio.TimeoutError) as e:
-                    log(f"Aviso: click_salir() falló ({e}). Continuando con navegación directa.")
-                await asyncio.sleep(INTERVALO_REINTENTO)
+                    log(f"Aviso: click_salir() falló ({e}). Navegación completa en el siguiente ciclo.")
+                espera = intervalo_con_jitter(INTERVALO_REINTENTO)
+                log(f"Reintentando en {espera:.0f}s...")
+                await asyncio.sleep(espera)
             else:
                 # EstadoPagina.DESCONOCIDO
                 espera = backoff.registrar_error("desconocido")
@@ -644,6 +645,7 @@ async def main() -> None:
                 await asyncio.sleep(espera)
 
         except ConnectionError as e:
+            skip_navegacion = False
             espera = backoff.registrar_error("conexion")
             log(f"Conexión perdida: {e}. Reconectando en {espera:.0f}s... (error #{backoff.errores_consecutivos})")
             if backoff.debe_alertar:
@@ -660,6 +662,7 @@ async def main() -> None:
                 log(f"Reconexión fallida: {e2}. Se reintentará en el próximo ciclo.")
 
         except asyncio.TimeoutError:
+            skip_navegacion = False
             espera = backoff.registrar_error("timeout")
             log(f"Timeout en carga de página. Reiniciando en {espera:.0f}s... (error #{backoff.errores_consecutivos})")
             if backoff.debe_alertar:
@@ -667,6 +670,7 @@ async def main() -> None:
             await asyncio.sleep(espera)
 
         except RuntimeError as e:
+            skip_navegacion = False
             espera = backoff.registrar_error("js_error")
             log(f"Error JS: {e}. Reiniciando en {espera:.0f}s... (error #{backoff.errores_consecutivos})")
             if backoff.debe_alertar:
@@ -674,6 +678,7 @@ async def main() -> None:
             await asyncio.sleep(espera)
 
         except Exception as e:
+            skip_navegacion = False
             espera = backoff.registrar_error("inesperado")
             log(f"Error inesperado: {type(e).__name__}: {e}. Reiniciando en {espera:.0f}s... (error #{backoff.errores_consecutivos})")
             if backoff.debe_alertar:

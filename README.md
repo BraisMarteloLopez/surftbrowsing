@@ -219,16 +219,15 @@ La evaluación de la página combina múltiples verificaciones (contenido mínim
 **Estado: NO HAY CITAS** (texto "no hay citas" confirmado + botón Salir presente)
 
 1. Intenta hacer click en el botón "Salir" → `getElementById('btnSalir').click()`. Si falla, continúa igualmente.
-2. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS`, por defecto 60 segundos)
-3. Repite el proceso completo desde el PASO 0
+2. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS` ±15% jitter)
+3. Si "Salir" funcionó, el portal ya devuelve al inicio: el script **reutiliza la sesión sin navegar de nuevo** a la URL de inicio (reduce peticiones HTTP). Si falló, navega desde cero.
 
 **Estado: HAY CITAS** (sin texto "no hay citas" + URL del portal válida + contenido suficiente)
 
 1. El script NO toca nada en la página. La deja exactamente en el estado en que está.
 2. Emite una alerta sonora repetida (bucle de sonido) para que el usuario la oiga aunque no esté delante del PC.
 3. Imprime en consola un mensaje destacado con timestamp.
-4. Entra en un bucle de mantenimiento de sesión: periódicamente (cada 30 segundos) envía un `fetch()` HTTP HEAD a la URL actual del portal con `credentials: 'same-origin'` para mantener la sesión activa server-side.
-5. El bucle de mantenimiento + alerta continúa indefinidamente hasta que el usuario toma el control o para el script con Ctrl+C.
+4. La alerta continúa indefinidamente hasta que el usuario toma el control o para el script con Ctrl+C.
 
 **Estado: DESCONOCIDO** (página vacía, URL inesperada, o señales contradictorias)
 
@@ -251,9 +250,9 @@ El parámetro `DELAY_ENTRE_ACCIONES_SEGUNDOS` en `.env` controla esta pausa. Por
 
 **Comportamiento:**
 
-- Antes de cada interacción con un elemento (seleccionar, rellenar, click), el script espera `DELAY_ENTRE_ACCIONES_SEGUNDOS`.
+- Antes de cada interacción con un elemento (seleccionar, rellenar, click), el script espera un tiempo **aleatorio** en torno a `DELAY_ENTRE_ACCIONES_SEGUNDOS` (±50%). Ejemplo: con delay de 5s, cada acción espera entre 2.5s y 7.5s.
 - La espera se aplica ENTRE acciones dentro de un mismo formulario, no solo entre formularios.
-- La espera entre reintentos completos (cuando no hay citas) es un parámetro separado: `INTERVALO_REINTENTO_SEGUNDOS`.
+- La espera entre reintentos completos (cuando no hay citas) es un parámetro separado: `INTERVALO_REINTENTO_SEGUNDOS`, con un **jitter de ±15%** para evitar cadencia periódica detectable.
 
 **Ejemplo con delay de 1 segundo:**
 

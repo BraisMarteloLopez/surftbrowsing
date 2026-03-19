@@ -16,7 +16,7 @@ from cita_bot import (
     paso_formulario_1, paso_formulario_2, paso_formulario_3,
     paso_formulario_4, paso_formulario_5,
     ciclo_completo, evaluar_estado_pagina,
-    safe_js_string, ejecutar_js, mantener_sesion,
+    safe_js_string, ejecutar_js, intervalo_con_jitter,
 )
 
 
@@ -304,53 +304,19 @@ class TestCicloCompleto:
 # mantener_sesion
 # ---------------------------------------------------------------------------
 
-class TestMantenerSesion:
-    @pytest.mark.asyncio
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_mantener_sesion_usa_fetch(self, mock_ejs, mock_sleep):
-        cdp = AsyncMock(spec=CDPSession)
+class TestIntervaloConJitter:
+    def test_jitter_rango(self):
+        """El jitter produce valores dentro de ±15% del base."""
+        base = 100.0
+        for _ in range(100):
+            resultado = intervalo_con_jitter(base)
+            assert 85.0 <= resultado <= 115.0
 
-        # Ejecutar un solo ciclo del keep-alive
-        call_count = 0
-        original_sleep = mock_sleep.side_effect
-
-        async def break_after_one(*args):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 1:
-                raise asyncio.CancelledError()
-
-        mock_sleep.side_effect = break_after_one
-
-        with pytest.raises(asyncio.CancelledError):
-            await mantener_sesion(cdp)
-
-        # Verificar que usó fetch (tráfico HTTP real)
-        js_code = mock_ejs.call_args[0][1]
-        assert "fetch" in js_code
-        assert "credentials" in js_code
-
-    @pytest.mark.asyncio
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_mantener_sesion_tolera_errores(self, mock_ejs, mock_sleep):
-        cdp = AsyncMock(spec=CDPSession)
-        mock_ejs.side_effect = RuntimeError("WS muerto")
-
-        call_count = 0
-
-        async def break_after_one(*args):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 1:
-                raise asyncio.CancelledError()
-
-        mock_sleep.side_effect = break_after_one
-
-        with pytest.raises(asyncio.CancelledError):
-            await mantener_sesion(cdp)
-        # No lanzó RuntimeError — la toleró
+    def test_jitter_no_es_constante(self):
+        """El jitter produce valores diferentes (no siempre el mismo)."""
+        base = 60.0
+        resultados = {intervalo_con_jitter(base) for _ in range(20)}
+        assert len(resultados) > 1
 
 
 # ---------------------------------------------------------------------------
