@@ -340,6 +340,9 @@ async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
     valor = safe_js_string(ids["valor_madrid"])
     boton_id = safe_js_string(ids["boton_aceptar_f1"])
 
+    if not await esperar_elemento(cdp, ids["dropdown_provincia"]):
+        raise RuntimeError(f"Elemento #{ids['dropdown_provincia']} no apareció tras carga de página")
+
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
         document.getElementById('{dropdown_id}').dispatchEvent(new Event('change', {{ bubbles: true }}));
@@ -360,6 +363,9 @@ async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
     valor = safe_js_string(ids["valor_tramite"])
     boton_id = safe_js_string(ids["boton_aceptar_f2"])
 
+    if not await esperar_elemento(cdp, ids["dropdown_tramite"]):
+        raise RuntimeError(f"Elemento #{ids['dropdown_tramite']} no apareció tras carga de página")
+
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
         document.getElementById('{dropdown_id}').dispatchEvent(new Event('change', {{ bubbles: true }}));
@@ -377,6 +383,10 @@ async def paso_formulario_3(cdp: CDPSession, ids: dict) -> None:
     await delay()
 
     boton_id = safe_js_string(ids["boton_entrar_f3"])
+
+    if not await esperar_elemento(cdp, ids["boton_entrar_f3"]):
+        raise RuntimeError(f"Elemento #{ids['boton_entrar_f3']} no apareció tras carga de página")
+
     log("Formulario 3: aviso aceptado, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -421,6 +431,10 @@ async def paso_formulario_5(cdp: CDPSession, ids: dict) -> None:
     await delay()
 
     boton_id = safe_js_string(ids["boton_solicitar_cita"])
+
+    if not await esperar_elemento(cdp, ids["boton_solicitar_cita"]):
+        raise RuntimeError(f"Elemento #{ids['boton_solicitar_cita']} no apareció tras carga de página")
+
     log("Formulario 5: cita solicitada, esperando respuesta...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -478,6 +492,10 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
 async def click_salir(cdp: CDPSession, ids: dict) -> None:
     """Click en botón Salir de la página sin citas."""
     boton_id = safe_js_string(ids["boton_salir_nocita"])
+
+    if not await esperar_elemento(cdp, ids["boton_salir_nocita"]):
+        raise RuntimeError(f"Elemento #{ids['boton_salir_nocita']} no apareció tras carga de página")
+
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 

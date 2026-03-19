@@ -122,9 +122,11 @@ class TestClickYEsperarCarga:
 class TestClickSalir:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
-    async def test_click_salir_usa_safe_js(self, mock_click, ids):
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
+    async def test_click_salir_usa_safe_js(self, mock_esperar, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await click_salir(cdp, ids)
+        mock_esperar.assert_called_once()
         js_code = mock_click.call_args[0][1]
         assert "btnSalir" in js_code
 
@@ -149,13 +151,15 @@ class TestPasoFormulario1:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
     @patch("cita_bot.delay", new_callable=AsyncMock)
     @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
-    async def test_formulario_1_selecciona_provincia(self, mock_scroll, mock_delay, mock_ejs, mock_click, ids):
+    async def test_formulario_1_selecciona_provincia(self, mock_scroll, mock_delay, mock_esperar, mock_ejs, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_1(cdp, ids)
 
         mock_scroll.assert_called_once()
+        mock_esperar.assert_called_once()
         js_code = mock_ejs.call_args[0][1]
         assert "form" in js_code
         assert safe_js_string(ids["valor_madrid"]) in js_code
@@ -171,13 +175,15 @@ class TestPasoFormulario2:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
     @patch("cita_bot.delay", new_callable=AsyncMock)
     @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
-    async def test_formulario_2_selecciona_tramite(self, mock_scroll, mock_delay, mock_ejs, mock_click, ids):
+    async def test_formulario_2_selecciona_tramite(self, mock_scroll, mock_delay, mock_esperar, mock_ejs, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_2(cdp, ids)
 
         mock_scroll.assert_called_once()
+        mock_esperar.assert_called_once()
         js_code = mock_ejs.call_args[0][1]
         assert safe_js_string(ids["dropdown_tramite"]) in js_code
         assert "4112" in js_code
@@ -190,13 +196,15 @@ class TestPasoFormulario2:
 class TestPasoFormulario3:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
     @patch("cita_bot.delay", new_callable=AsyncMock)
     @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
-    async def test_formulario_3_click_entrar(self, mock_scroll, mock_delay, mock_click, ids):
+    async def test_formulario_3_click_entrar(self, mock_scroll, mock_delay, mock_esperar, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_3(cdp, ids)
 
         mock_scroll.assert_called_once()
+        mock_esperar.assert_called_once()
         click_js = mock_click.call_args[0][1]
         assert "btnEntrar" in click_js
 
@@ -281,11 +289,13 @@ class TestPasoFormulario4:
 class TestPasoFormulario5:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
     @patch("cita_bot.delay", new_callable=AsyncMock)
-    async def test_formulario_5_solicita_cita(self, mock_delay, mock_click, ids):
+    async def test_formulario_5_solicita_cita(self, mock_delay, mock_esperar, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_5(cdp, ids)
 
+        mock_esperar.assert_called_once()
         click_js = mock_click.call_args[0][1]
         assert "btnEnviar" in click_js
 
