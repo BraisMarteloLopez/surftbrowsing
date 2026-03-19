@@ -362,11 +362,17 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
 
 
 async def click_salir(cdp: CDPSession, ids: dict) -> bool:
-    """Click en botón Salir. Devuelve True si tuvo éxito, False si no pudo."""
+    """Click en botón Salir para volver al inicio via navegación orgánica del portal.
+
+    Nunca usa Page.navigate directo — el WAF valora la navegación a través
+    de los controles del portal. Si el botón no se encuentra (caso raro),
+    loguea advertencia y continúa; el siguiente ciclo intentará desde
+    la página actual.
+    """
     boton_id = safe_js_string(ids["boton_salir_nocita"])
 
     if not await esperar_elemento(cdp, ids["boton_salir_nocita"]):
-        log("Botón Salir no encontrado, se navegará al inicio directamente")
+        log("ADVERTENCIA: Botón Salir no encontrado")
         return False
 
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
@@ -582,8 +588,8 @@ async def main() -> None:
                 backoff.registrar_exito()
                 waf_backoff.registrar_exito()
                 log("Resultado: NO HAY CITAS")
-                if await click_salir(cdp, ids):
-                    skip_navegacion = True
+                await click_salir(cdp, ids)
+                skip_navegacion = True
                 # Limpiar caché y storage antes del siguiente ciclo
                 await limpiar_datos_navegador(cdp, url_inicio)
                 espera = intervalo_con_jitter(INTERVALO_REINTENTO)

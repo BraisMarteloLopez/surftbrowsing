@@ -182,6 +182,7 @@ class TestClickSalir:
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=False)
     async def test_click_salir_boton_no_encontrado(self, mock_esperar, mock_click, ids):
+        """Si botón Salir no existe, devuelve False sin intentar navegación."""
         cdp = AsyncMock(spec=CDPSession)
         result = await click_salir(cdp, ids)
         assert result is False
