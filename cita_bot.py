@@ -460,6 +460,7 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
     1. Presencia del texto "no hay citas" (case-insensitive, parcial).
     2. Contenido mínimo en el body (página no vacía/error).
     3. URL coherente con el flujo del portal.
+    4. (Opcional) Presencia de texto positivo "hay citas" para confirmar.
     """
     # 1. Espera aleatoria para simular lectura humana tras carga
     await asyncio.sleep(random.uniform(DELAY_EVALUACION_MIN, DELAY_EVALUACION_MAX))
@@ -488,7 +489,21 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
         log(f"Estado: URL inesperada: {current_url}")
         return EstadoPagina.DESCONOCIDO
 
-    # 6. No se encontró "no hay citas" + URL válida + contenido sustancial → posible cita
+    # 6. Verificación positiva opcional: confirmar con texto de cita disponible
+    texto_positivo = ids.get("texto_hay_citas", "")
+    if texto_positivo:
+        texto_pos_buscar = safe_js_string(texto_positivo.lower())
+        positivo_check = await ejecutar_js(cdp, f"""
+            document.body.innerText.toLowerCase().includes('{texto_pos_buscar}');
+        """)
+        if positivo_check.get("value", False):
+            log("Confirmación positiva: texto de cita disponible encontrado")
+            return EstadoPagina.HAY_CITAS
+        # Texto positivo configurado pero no encontrado → estado incierto
+        log("Estado: no se encontró texto negativo NI positivo")
+        return EstadoPagina.DESCONOCIDO
+
+    # 7. Sin verificación positiva configurada: asumir cita disponible
     return EstadoPagina.HAY_CITAS
 
 

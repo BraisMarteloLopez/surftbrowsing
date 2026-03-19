@@ -147,3 +147,68 @@ async def test_icpplustiem_url_is_valid(mock_sleep, mock_ejs, sample_ids):
     ])
     result = await evaluar_estado_pagina(cdp, sample_ids)
     assert result == EstadoPagina.HAY_CITAS
+
+
+# ---------------------------------------------------------------------------
+# Tests de verificación positiva (texto_hay_citas)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def ids_con_texto_positivo():
+    return {
+        "boton_salir_nocita": "btnSalir",
+        "texto_no_hay_citas": "En este momento no hay citas disponibles.",
+        "texto_hay_citas": "Seleccione una fecha",
+    }
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+@patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+async def test_texto_positivo_encontrado_es_hay_citas(mock_sleep, mock_ejs, ids_con_texto_positivo):
+    """Texto positivo configurado y presente → HAY_CITAS."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.side_effect = _make_ejecutar_js_mock([
+        {"value": 500},                # body length
+        {"value": False},              # no incluye 'no hay citas'
+        {"value": "https://icp.administracionelectronica.gob.es/icpplustiem/citar"},  # URL
+        {"value": True},               # incluye texto positivo
+    ])
+    result = await evaluar_estado_pagina(cdp, ids_con_texto_positivo)
+    assert result == EstadoPagina.HAY_CITAS
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+@patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+async def test_texto_positivo_no_encontrado_es_desconocido(mock_sleep, mock_ejs, ids_con_texto_positivo):
+    """Texto positivo configurado pero ausente → DESCONOCIDO."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.side_effect = _make_ejecutar_js_mock([
+        {"value": 500},                # body length
+        {"value": False},              # no incluye 'no hay citas'
+        {"value": "https://icp.administracionelectronica.gob.es/icpplustiem/citar"},  # URL
+        {"value": False},              # NO incluye texto positivo
+    ])
+    result = await evaluar_estado_pagina(cdp, ids_con_texto_positivo)
+    assert result == EstadoPagina.DESCONOCIDO
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+@patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+async def test_texto_positivo_vacio_no_afecta(mock_sleep, mock_ejs):
+    """texto_hay_citas vacío → se ignora, comportamiento original."""
+    ids_vacio = {
+        "boton_salir_nocita": "btnSalir",
+        "texto_no_hay_citas": "En este momento no hay citas disponibles.",
+        "texto_hay_citas": "",
+    }
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.side_effect = _make_ejecutar_js_mock([
+        {"value": 500},
+        {"value": False},
+        {"value": "https://icp.administracionelectronica.gob.es/icpplustiem/citar"},
+    ])
+    result = await evaluar_estado_pagina(cdp, ids_vacio)
+    assert result == EstadoPagina.HAY_CITAS
