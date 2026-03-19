@@ -51,6 +51,15 @@ DELAY_EVALUACION_MAX = float(os.getenv("DELAY_EVALUACION_MAX", "5.0"))
 # Timeout para esperar que un elemento aparezca en el DOM
 TIMEOUT_ESPERA_ELEMENTO = float(os.getenv("TIMEOUT_ESPERA_ELEMENTO_SEGUNDOS", "10"))
 
+# Pausa entre pasos de formulario (simula lectura/pensamiento)
+PAUSA_ENTRE_PASOS_MIN = float(os.getenv("PAUSA_ENTRE_PASOS_MIN", "2.0"))
+PAUSA_ENTRE_PASOS_MAX = float(os.getenv("PAUSA_ENTRE_PASOS_MAX", "5.0"))
+
+# WAF backoff: tiempos de espera cuando el firewall del portal bloquea la IP
+WAF_BACKOFF_BASE = float(os.getenv("WAF_BACKOFF_BASE_SEGUNDOS", "300"))
+WAF_BACKOFF_MAX = float(os.getenv("WAF_BACKOFF_MAX_SEGUNDOS", "900"))
+WAF_BACKOFF_UMBRAL_ALERTA = int(os.getenv("WAF_BACKOFF_UMBRAL_ALERTA", "3"))
+
 CDP_PORT = 9222
 CDP_URL = f"http://localhost:{CDP_PORT}/json"
 
@@ -339,9 +348,13 @@ async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
 async def detectar_waf(cdp: CDPSession) -> bool:
     """Detecta si la página actual es un bloqueo de WAF (F5 BIG-IP, etc.).
 
-    Busca patrones comunes de páginas de rechazo WAF:
-    - "The requested URL was rejected"
-    - "Your support ID is"
+    Requiere AMBAS condiciones para evitar falsos positivos:
+    1. "The requested URL was rejected" (mensaje principal del WAF)
+    2. "Your support ID is" (identificador de sesión del WAF)
+
+    Ambos textos son exclusivos de la página de rechazo WAF y no aparecen
+    en ninguna página legítima del portal ICP (ni formularios, ni citas,
+    ni errores del portal).
     """
     try:
         result = await ejecutar_js(cdp, "document.body.innerText;")
@@ -351,7 +364,7 @@ async def detectar_waf(cdp: CDPSession) -> bool:
         texto_lower = texto.lower()
         return (
             "the requested url was rejected" in texto_lower
-            or ("your support id is" in texto_lower and "consult" in texto_lower)
+            and "your support id is" in texto_lower
         )
     except Exception:
         return False
@@ -365,7 +378,7 @@ async def delay() -> None:
 
 async def pausa_entre_pasos() -> None:
     """Pausa más larga entre pasos de formulario para simular lectura/pensamiento."""
-    await asyncio.sleep(random.uniform(2.0, 5.0))
+    await asyncio.sleep(random.uniform(PAUSA_ENTRE_PASOS_MIN, PAUSA_ENTRE_PASOS_MAX))
 
 
 # ---------------------------------------------------------------------------
@@ -674,9 +687,9 @@ async def main() -> None:
         umbral_alerta=10,
     )
     waf_backoff = BackoffController(
-        intervalo_base=300.0,   # 5 min mínimo tras primer ban
-        max_intervalo=900.0,    # 15 min máximo
-        umbral_alerta=3,
+        intervalo_base=WAF_BACKOFF_BASE,
+        max_intervalo=WAF_BACKOFF_MAX,
+        umbral_alerta=WAF_BACKOFF_UMBRAL_ALERTA,
     )
 
     skip_navegacion = False

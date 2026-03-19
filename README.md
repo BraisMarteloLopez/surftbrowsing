@@ -155,7 +155,7 @@ El usuario abre Brave desde línea de comandos con el flag de depuración remota
 
 ### PASO 0 — Navegación a la URL de inicio
 
-El script navega automáticamente a la URL de inicio del portal ICP. Espera a que la página cargue completamente y aplica zoom al 33% antes de continuar.
+El script navega automáticamente a la URL de inicio del portal ICP. Espera a que la página cargue completamente. Si detecta un bloqueo WAF, aplica backoff y reintenta.
 
 > **URL:** `https://icp.administracionelectronica.gob.es/icpplus/index.html`
 
@@ -166,7 +166,7 @@ Acciones JS ejecutadas por el script:
 1. Seleccionar "Madrid" en el dropdown de provincia → `getElementById('form').value = '/icpplustiem/citar?p=28&locale=es'`
 2. Disparar evento `change` → `getElementById('form').dispatchEvent(new Event('change', { bubbles: true }))`
 3. Click en botón "Aceptar" → `getElementById('btnAceptar').click()`
-4. Esperar carga de la siguiente página + aplicar zoom 33%
+4. Esperar carga de la siguiente página + scroll humano
 
 > **Nota:** El botón Aceptar ejecuta la función JS `envia()` al hacer click. Se usa `.click()` para que se dispare automáticamente.
 
@@ -178,7 +178,7 @@ Acciones JS ejecutadas por el script:
 2. Seleccionar trámite → `getElementById('tramiteGrupo[0]').value = '4112'`
 3. Disparar evento `change` → `getElementById('tramiteGrupo[0]').dispatchEvent(new Event('change', { bubbles: true }))`
 4. Click en botón "Aceptar" → `getElementById('btnAceptar').click()`
-5. Esperar carga de la siguiente página + aplicar zoom 33%
+5. Esperar carga de la siguiente página + scroll humano
 
 > **Nota:** El dropdown de trámite tiene `onchange` propio que llama a `eliminarSeleccionOtrosGrupos(0)` y `cargaMensajesTramite()`. El `dispatchEvent` los dispara automáticamente.
 
@@ -187,7 +187,7 @@ Acciones JS ejecutadas por el script:
 Acciones JS ejecutadas por el script:
 
 1. Click en botón "Entrar" → `getElementById('btnEntrar').click()`
-2. Esperar carga de la siguiente página + aplicar zoom 33%
+2. Esperar carga de la siguiente página + scroll humano
 
 > **Nota:** El botón dice "Entrar" (no "Aceptar") y ejecuta `document.forms[0].submit()` al hacer click.
 
@@ -200,7 +200,7 @@ Acciones JS ejecutadas por el script:
 3. Rellenar campo Nombre y Apellidos → `getElementById('txtDesCitado').value = NOMBRE` (valor leído del `.env`)
 4. Disparar evento `change` → `getElementById('txtDesCitado').dispatchEvent(new Event('change', { bubbles: true }))`
 5. Click en botón "Aceptar" → `getElementById('btnEnviar').click()`
-6. Esperar carga de la siguiente página + aplicar zoom 33%
+6. Esperar carga de la siguiente página + scroll humano
 
 > **Nota:** El input Nombre tiene `onchange="comprobarDatos()"`, por lo que se dispara evento `change` (no `input`) para activar la validación.
 
@@ -209,20 +209,26 @@ Acciones JS ejecutadas por el script:
 Acciones JS ejecutadas por el script:
 
 1. Click en botón "Solicitar Cita" → `getElementById('btnEnviar').click()`
-2. Esperar carga de la respuesta + aplicar zoom 33%
+2. Esperar carga de la respuesta + scroll humano
 3. Evaluar el estado de la página (ver sección 10 para el detalle completo)
 
 > **Nota:** El botón ejecuta `enviar('solicitud')` al hacer click. Se usa `.click()` para dispararlo.
 
-La evaluación de la página combina múltiples verificaciones (contenido mínimo, búsqueda case-insensitive del texto de `config.json`, existencia del botón Salir, y verificación de URL) para clasificar la página en tres estados:
+La evaluación de la página combina múltiples verificaciones (detección WAF, contenido mínimo, búsqueda case-insensitive del texto de `config.json`, verificación de URL, y texto positivo opcional) para clasificar la página en cuatro estados:
 
-**Estado: NO HAY CITAS** (texto "no hay citas" confirmado + botón Salir presente)
+**Estado: WAF_BANEADO** (página de rechazo del WAF detectada)
+
+1. El script no toca la página.
+2. Aplica backoff agresivo (5-15 min configurable).
+3. Reinicia el ciclo completo desde el PASO 0.
+
+**Estado: NO HAY CITAS** (texto "no hay citas" confirmado — señal definitiva)
 
 1. Intenta hacer click en el botón "Salir" → `getElementById('btnSalir').click()`. Si falla, continúa igualmente.
 2. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS` ±15% jitter)
 3. Si "Salir" funcionó, el portal ya devuelve al inicio: el script **reutiliza la sesión sin navegar de nuevo** a la URL de inicio (reduce peticiones HTTP). Si falló, navega desde cero.
 
-**Estado: HAY CITAS** (sin texto "no hay citas" + URL del portal válida + contenido suficiente)
+**Estado: HAY CITAS** (sin texto negativo + URL del portal válida + contenido suficiente + texto positivo si configurado)
 
 1. El script NO toca nada en la página. La deja exactamente en el estado en que está.
 2. Emite una alerta sonora repetida (bucle de sonido) para que el usuario la oiga aunque no esté delante del PC.
@@ -244,40 +250,59 @@ El objetivo es que cuando el usuario llegue al navegador, la página esté exact
 
 ## 7. Cadencia entre acciones (anti-bloqueo)
 
-Cada acción del script (seleccionar un valor, rellenar un campo, hacer click en un botón, esperar carga de página) tiene una pausa configurable antes de ejecutarse. Esta pausa simula el tiempo que un humano tardaría entre acciones y evita que el portal detecte un patrón de interacción inhumanamente rápido.
+El script implementa múltiples capas de temporización para simular comportamiento humano y evitar el bloqueo del WAF del portal:
 
-El parámetro `DELAY_ENTRE_ACCIONES_SEGUNDOS` en `.env` controla esta pausa. Por defecto es 1 segundo.
+### 7.1. Delays entre acciones (`DELAY_ACCION_BASE` + `DELAY_ACCION_VARIANZA`)
 
-**Comportamiento:**
-
-- Antes de cada interacción con un elemento (seleccionar, rellenar, click), el script espera un tiempo **aleatorio** en torno a `DELAY_ENTRE_ACCIONES_SEGUNDOS` (±50%). Ejemplo: con delay de 5s, cada acción espera entre 2.5s y 7.5s.
-- La espera se aplica ENTRE acciones dentro de un mismo formulario, no solo entre formularios.
-- La espera entre reintentos completos (cuando no hay citas) es un parámetro separado: `INTERVALO_REINTENTO_SEGUNDOS`, con un **jitter de ±15%** para evitar cadencia periódica detectable.
-
-**Ejemplo con delay de 1 segundo:**
+Antes de cada interacción con un elemento (seleccionar, rellenar, click), el script espera:
 
 ```
-[09:15:32.000] Navegando a URL de inicio...
-[09:15:34.000] Página cargada
-[09:15:35.000] (+1s) Seleccionando provincia Madrid
-[09:15:36.000] (+1s) Click en Aceptar F1
-[09:15:38.000] Página cargada
-[09:15:39.000] (+1s) Seleccionando trámite 4112
-[09:15:40.000] (+1s) Click en Aceptar F2
-...
+delay = DELAY_ACCION_BASE + random(0, DELAY_ACCION_BASE × DELAY_ACCION_VARIANZA)
 ```
 
-**Recomendaciones de ajuste:**
+Con los valores por defecto (`base=2.0`, `varianza=0.8`), cada acción espera entre **2.0 y 3.6 segundos**.
 
-- `2.0` segundos: valor por defecto, equilibrio entre velocidad y riesgo de detección
-- `1.0` segundo: más agresivo, usar solo si no se observan baneos
-- `3.0` segundos o más: muy conservador, usar si el WAF banea frecuentemente
+### 7.2. Pausa entre formularios (`PAUSA_ENTRE_PASOS_MIN` / `_MAX`)
 
-Además, entre cada paso de formulario se aplica una pausa adicional de 2-5 segundos que simula el tiempo de lectura de un humano.
+Entre cada paso del formulario (F1→F2, F2→F3, etc.), el script aplica una pausa adicional que simula tiempo de lectura:
 
-Un ciclo completo (5 formularios) con delay de 2 segundos tarda aproximadamente 30-45 segundos incluyendo tiempos de carga de página y pausas entre pasos. Con un intervalo de reintento de 120 segundos, el script ejecuta aproximadamente un intento cada 2.5-3 minutos.
+```
+pausa = random(PAUSA_ENTRE_PASOS_MIN, PAUSA_ENTRE_PASOS_MAX)
+```
 
-### Detección de WAF (Web Application Firewall)
+Por defecto: **2 a 5 segundos** entre cada formulario.
+
+### 7.3. Scroll humano (`DELAY_SCROLL_MIN` / `_MAX`)
+
+En cada formulario, el script hace scroll de 1 a 3 veces con distancias aleatorias (100-300px) y pausas entre cada scroll:
+
+```
+pausa_scroll = random(DELAY_SCROLL_MIN, DELAY_SCROLL_MAX)
+```
+
+Por defecto: **0.8 a 2.0 segundos** entre cada paso de scroll.
+
+### 7.4. Evaluación de resultado (`DELAY_EVALUACION_MIN` / `_MAX`)
+
+Tras solicitar la cita (PASO 5), el script espera un tiempo aleatorio antes de leer el resultado, simulando que un humano tarda en leer la página:
+
+```
+pausa_evaluacion = random(DELAY_EVALUACION_MIN, DELAY_EVALUACION_MAX)
+```
+
+Por defecto: **2 a 5 segundos**.
+
+### 7.5. Intervalo entre reintentos (`INTERVALO_REINTENTO_SEGUNDOS`)
+
+Cuando no hay citas, el script espera antes de iniciar un nuevo ciclo completo. Se aplica un **jitter de ±15%** para evitar cadencia periódica.
+
+Por defecto: **120 segundos** (±15% → entre 102 y 138 segundos).
+
+### Tiempo total por ciclo
+
+Un ciclo completo (5 formularios) con los valores por defecto tarda aproximadamente **30-50 segundos** de interacción activa. Sumando el intervalo de reintento de 120 segundos, el script ejecuta **un intento cada ~3 minutos**.
+
+### 7.6. Detección de WAF (Web Application Firewall)
 
 El portal ICP está protegido por un WAF (F5 BIG-IP) que puede bloquear temporalmente la IP si detecta patrones de automatización. Cuando esto ocurre, la página muestra:
 
@@ -286,15 +311,17 @@ The requested URL was rejected. Please consult with your administrador.
 Your support ID is: <número>
 ```
 
-El bot detecta automáticamente esta página y aplica un **backoff agresivo**:
+El bot detecta automáticamente esta página en tres puntos del flujo (tras navegación, tras cada click de formulario, y tras solicitar cita) y aplica un **backoff agresivo** con un controlador dedicado:
 
-| Ban consecutivo | Espera |
+| Ban consecutivo | Espera por defecto |
 |----------------|--------|
-| 1er ban | 5 minutos |
+| 1er ban | 5 minutos (`WAF_BACKOFF_BASE_SEGUNDOS`) |
 | 2do ban | 10 minutos |
-| 3er+ ban | 15 minutos (máximo) |
+| 3er+ ban | 15 minutos (`WAF_BACKOFF_MAX_SEGUNDOS`, máximo) |
 
-Tras un ciclo exitoso, el contador de bans se resetea. Si el WAF te banea frecuentemente, aumenta `INTERVALO_REINTENTO_SEGUNDOS` y `DELAY_ACCION_BASE` en `.env`.
+Tras **3 bans consecutivos** (`WAF_BACKOFF_UMBRAL_ALERTA`), el log muestra una alerta recomendando aumentar los delays. Tras un ciclo exitoso, el contador de bans se resetea.
+
+Todos los parámetros del WAF son configurables vía `.env` (ver sección 11.1).
 
 ---
 
@@ -334,10 +361,18 @@ El script imprime en consola un log por cada intento con el siguiente formato:
 [2026-03-18 09:15:43] Intento #1 — Formulario 4: rellenando datos personales
 [2026-03-18 09:15:46] Intento #1 — Formulario 5: solicitando cita
 [2026-03-18 09:15:49] Intento #1 — Resultado: NO HAY CITAS
-[2026-03-18 09:15:49] Intento #1 — Reintentando en 60s...
-[2026-03-18 09:16:49] Intento #2 — Navegando a URL de inicio...
+[2026-03-18 09:15:49] Intento #1 — Reintentando en 120s...
+[2026-03-18 09:17:49] Intento #2 — Navegando a URL de inicio...
 ...
 [2026-03-18 11:42:17] Intento #87 — *** CITA DISPONIBLE *** — Toma el control del navegador
+```
+
+Cuando el WAF bloquea la IP:
+
+```
+[2026-03-18 09:20:15] Intento #5 — *** WAF DETECTADO *** Baneado por el firewall del portal.
+[2026-03-18 09:20:15] Intento #5 — Esperando 5.0 minutos antes de reintentar... (ban #1)
+[2026-03-18 09:25:15] Intento #6 — Navegando a URL de inicio...
 ```
 
 Cuando hay errores, el log incluye información de backoff:
@@ -364,25 +399,28 @@ Sin este log no es posible saber si el script lleva horas fallando en silencio.
 
 Tras solicitar cita (PASO 5), el script evalúa el estado de la página con múltiples verificaciones para evitar falsos positivos:
 
-1. **Contenido mínimo:** Verifica que `document.body.innerText` tiene al menos 50 caracteres (descarta páginas vacías o de error).
-2. **Búsqueda case-insensitive:** Busca `"no hay citas disponibles"` en minúsculas (tolera variaciones del portal).
-3. **Validación estructural:** Confirma que el botón "Salir" (`btnSalir`) existe en la página.
+1. **Detección WAF:** Antes de evaluar, comprueba si la página es un bloqueo del firewall (ver sección 7.6).
+2. **Contenido mínimo:** Verifica que `document.body.innerText` tiene al menos 50 caracteres (descarta páginas vacías o de error).
+3. **Búsqueda case-insensitive:** Busca el texto de `config.json` (`texto_no_hay_citas`) en minúsculas.
 4. **Verificación de URL:** Comprueba que la URL contiene `icpplus` o `icpplustiem`.
+5. **Verificación positiva (opcional):** Si `texto_hay_citas` está configurado en `config.json`, confirma la presencia del texto positivo.
 
-Con estas señales, el script clasifica la página en tres estados:
+Con estas señales, el script clasifica la página en cuatro estados:
 
 | Estado | Condiciones | Comportamiento |
 |---|---|---|
-| **NO HAY CITAS** | Texto "no hay citas" + botón Salir presente | Click en Salir, espera intervalo, reintenta |
-| **HAY CITAS** | Sin texto "no hay citas" + URL válida + contenido suficiente | Alerta sonora + keep-alive de sesión |
+| **WAF_BANEADO** | Página de rechazo del WAF (ambas señales: "URL was rejected" + "support ID") | Backoff agresivo de 5-15 min |
+| **NO HAY CITAS** | Texto "no hay citas" presente (señal definitiva) | Click en Salir, espera intervalo, reintenta |
+| **HAY CITAS** | Sin texto negativo + URL válida + contenido suficiente (+ texto positivo si configurado) | Alerta sonora |
 | **DESCONOCIDO** | Página vacía, URL inesperada, o señales contradictorias | Log de advertencia, espera con backoff, reintenta |
 
-El estado **DESCONOCIDO** nunca se interpreta como "hay cita". Esto evita falsos positivos por errores del portal, páginas de mantenimiento o cargas incompletas.
+Los estados **DESCONOCIDO** y **WAF_BANEADO** nunca se interpretan como "hay cita". La detección WAF requiere **ambas** señales ("URL was rejected" **Y** "support ID") simultáneamente, lo que elimina cualquier riesgo de confundir una página legítima del portal con un bloqueo WAF.
 
 ### Manejo de errores en el ciclo
 
 | Error | Causa probable | Comportamiento |
 |---|---|---|
+| `WafBanError` | Firewall del portal bloqueó la IP | Backoff agresivo (5min, 10min, 15min max) |
 | `ConnectionError` | WebSocket muerto, Brave cerrado | Reconexión automática con backoff exponencial |
 | `TimeoutError` | Portal saturado, conexión lenta | Backoff exponencial (5s, 10s, 20s..., max 5min) |
 | `RuntimeError` (JS) | Elemento no encontrado, portal cambió IDs | Backoff exponencial + alerta tras 10 errores consecutivos |
@@ -404,13 +442,10 @@ NIE=X1234567A
 NOMBRE=NOMBRE APELLIDO1 APELLIDO2
 
 # Depuración (OPCIONAL — ejecutar solo hasta un paso concreto, 0-5)
-# Siempre empieza desde el paso 0. Si es menor que 5, ejecuta una sola vez y para.
-# 0=Solo navegación, 1=Provincia, 2=Trámite, 3=Aviso, 4=Datos personales, 5=Ciclo completo
 PASO_HASTA=5
 
 # Cadencia (OPCIONAL — valores por defecto si no se especifican)
 INTERVALO_REINTENTO_SEGUNDOS=120
-DELAY_ACCION_BASE=2.0
 TIMEOUT_CARGA_PAGINA_SEGUNDOS=15
 ```
 
@@ -418,15 +453,42 @@ El archivo `.env` NO se sube al repositorio (está en `.gitignore`). El usuario 
 
 El script valida al arrancar que `NIE` y `NOMBRE` existen y no están vacíos, y que `PASO_HASTA` está entre 0 y 5. Si alguna validación falla, muestra un error descriptivo y se cierra.
 
-| Variable | Obligatorio | Descripción | Valor por defecto |
-|---|---|---|---|
-| `NIE` | Sí | Número de identidad de extranjero | — |
-| `NOMBRE` | Sí | Nombre y apellidos completos | — |
-| `PASO_HASTA` | No | Paso hasta el que ejecutar (0-5). Para depuración. | `5` |
-| `INTERVALO_REINTENTO_SEGUNDOS` | No | Segundos entre reintentos cuando no hay cita | `120` |
-| `DELAY_ACCION_BASE` | No | Segundos base entre cada acción del formulario | `2.0` |
-| `DELAY_ACCION_VARIANZA` | No | Fracción de varianza aleatoria sobre base | `0.8` |
-| `TIMEOUT_CARGA_PAGINA_SEGUNDOS` | No | Timeout de espera de carga de página | `15` |
+#### Variables obligatorias
+
+| Variable | Descripción |
+|---|---|
+| `NIE` | Número de identidad de extranjero |
+| `NOMBRE` | Nombre y apellidos completos |
+
+#### Variables opcionales — Cadencia y tiempos
+
+| Variable | Descripción | Defecto |
+|---|---|---|
+| `PASO_HASTA` | Paso hasta el que ejecutar (0-5). Para depuración. | `5` |
+| `INTERVALO_REINTENTO_SEGUNDOS` | Segundos entre reintentos cuando no hay cita | `120` |
+| `TIMEOUT_CARGA_PAGINA_SEGUNDOS` | Timeout de espera de carga de página | `15` |
+| `TIMEOUT_ESPERA_ELEMENTO_SEGUNDOS` | Timeout para esperar que un elemento aparezca en el DOM | `10` |
+
+#### Variables opcionales — Delays humanizados
+
+| Variable | Descripción | Defecto |
+|---|---|---|
+| `DELAY_ACCION_BASE` | Segundos base entre cada acción del formulario | `2.0` |
+| `DELAY_ACCION_VARIANZA` | Fracción de varianza aleatoria sobre base. Rango resultante: `[base, base + base×varianza]` | `0.8` |
+| `DELAY_SCROLL_MIN` | Mínimo de pausa entre pasos de scroll (segundos) | `0.8` |
+| `DELAY_SCROLL_MAX` | Máximo de pausa entre pasos de scroll (segundos) | `2.0` |
+| `DELAY_EVALUACION_MIN` | Mínimo de pausa antes de evaluar resultado (segundos) | `2.0` |
+| `DELAY_EVALUACION_MAX` | Máximo de pausa antes de evaluar resultado (segundos) | `5.0` |
+| `PAUSA_ENTRE_PASOS_MIN` | Mínimo de pausa entre formularios (segundos) | `2.0` |
+| `PAUSA_ENTRE_PASOS_MAX` | Máximo de pausa entre formularios (segundos) | `5.0` |
+
+#### Variables opcionales — WAF (Web Application Firewall)
+
+| Variable | Descripción | Defecto |
+|---|---|---|
+| `WAF_BACKOFF_BASE_SEGUNDOS` | Espera tras el primer ban del WAF (segundos) | `300` (5 min) |
+| `WAF_BACKOFF_MAX_SEGUNDOS` | Espera máxima tras bans consecutivos (segundos) | `900` (15 min) |
+| `WAF_BACKOFF_UMBRAL_ALERTA` | Número de bans consecutivos antes de mostrar alerta | `3` |
 
 #### Modo depuración con `PASO_HASTA`
 
@@ -594,8 +656,8 @@ surftbrowsing/
 ├── requirements.txt       # Dependencias de producción
 ├── requirements-dev.txt   # Dependencias de desarrollo (pytest, coverage)
 ├── README.md              # Este documento
-├── TECHNICAL_DEBT.md      # Auditoría técnica detallada (12 ítems analizados)
-└── tests/                 # Tests automatizados (91 tests, 86% cobertura)
+├── TECHNICAL_DEBT.md      # Auditoría técnica detallada (17 ítems analizados)
+└── tests/                 # Tests automatizados (106+ tests)
     ├── conftest.py        # Fixtures: MockWebSocket, mock_cdp
     ├── test_backoff.py    # Tests de BackoffController
     ├── test_cdp_session.py # Tests de CDPSession (reconexión, timeouts)
@@ -619,7 +681,7 @@ python -m pytest tests/ --cov=cita_bot              # Con cobertura
 
 ## 18. Deuda técnica
 
-El archivo `TECHNICAL_DEBT.md` documenta 12 puntos de falla identificados en una auditoría exhaustiva del código. De estos:
+El archivo `TECHNICAL_DEBT.md` documenta 17 puntos de falla identificados en una auditoría exhaustiva del código. De estos:
 
-- **8 resueltos:** TD-01 (reconexión WS), TD-02 (falsos positivos), TD-03 (escape JS), TD-04 (click_salir), TD-08 (keep-alive HTTP), TD-09 (backoff), TD-10 (tests), TD-12 (timeouts)
-- **4 descartados:** TD-05 (selección de pestaña), TD-06 (asyncio deprecado), TD-07 (CAPTCHA), TD-11 (alerta en Linux)
+- **13 resueltos:** TD-01 (reconexión WS), TD-02 (falsos positivos), TD-03 (escape JS), TD-04 (click_salir), TD-08 (keep-alive HTTP), TD-09 (backoff), TD-10 (tests), TD-12 (timeouts diferenciados), TD-13 (escape redundante), TD-14 (click_salir tolerante), TD-15 (scroll antes de carga), TD-16 (asyncio deprecado), TD-17 (timeout configurable)
+- **4 descartados:** TD-05 (selección de pestaña), TD-06 (asyncio deprecado global), TD-07 (CAPTCHA), TD-11 (alerta en Linux)

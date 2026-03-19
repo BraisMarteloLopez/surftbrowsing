@@ -231,13 +231,35 @@ async def test_detectar_waf_pagina_rechazo(mock_ejs):
 
 @pytest.mark.asyncio
 @patch("cita_bot.ejecutar_js")
-async def test_detectar_waf_pagina_support_id(mock_ejs):
-    """Página con 'Your support ID is' + 'consult' → True."""
+async def test_detectar_waf_solo_support_id_no_es_waf(mock_ejs):
+    """Solo 'Your support ID' sin 'URL was rejected' → False (requiere ambas señales)."""
     cdp = AsyncMock(spec=CDPSession)
     mock_ejs.return_value = {
         "value": "Access denied. Your support ID is: <123456>. Please consult your administrator."
     }
-    assert await detectar_waf(cdp) is True
+    assert await detectar_waf(cdp) is False
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+async def test_detectar_waf_solo_url_rejected_no_es_waf(mock_ejs):
+    """Solo 'URL was rejected' sin 'support ID' → False (requiere ambas señales)."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.return_value = {
+        "value": "The requested URL was rejected. Try again later."
+    }
+    assert await detectar_waf(cdp) is False
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+async def test_detectar_waf_pagina_cita_no_es_waf(mock_ejs):
+    """Página real del portal con cita disponible → False."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.return_value = {
+        "value": "Seleccione una fecha y hora para su cita. Oficina de extranjería de Madrid."
+    }
+    assert await detectar_waf(cdp) is False
 
 
 @pytest.mark.asyncio
