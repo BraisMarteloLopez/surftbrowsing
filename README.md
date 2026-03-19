@@ -1,7 +1,7 @@
 # AUTO WEBSURFT
 
-**Fecha:** 18 de marzo de 2026
-**Estado:** Mapeo completado — Listo para implementar
+**Fecha:** 19 de marzo de 2026
+**Estado:** Implementado y funcional
 
 ---
 
@@ -127,7 +127,7 @@ NIE=TU_NIE_AQUI
 NOMBRE=TU NOMBRE Y APELLIDOS AQUI
 ```
 
-Opcionalmente se pueden ajustar los tiempos (ver sección 11.1 para todos los parámetros).
+Opcionalmente se pueden ajustar los tiempos y el paso de inicio (ver sección 11.1 para todos los parámetros).
 
 ### 5.5. Ejecutar el script
 
@@ -245,13 +245,13 @@ El objetivo es que cuando el usuario llegue al navegador, la página esté exact
 
 Cada acción del script (seleccionar un valor, rellenar un campo, hacer click en un botón, esperar carga de página) tiene una pausa configurable antes de ejecutarse. Esta pausa simula el tiempo que un humano tardaría entre acciones y evita que el portal detecte un patrón de interacción inhumanamente rápido.
 
-El parámetro `delay_entre_acciones_segundos` en `config.json` controla esta pausa. Por defecto es 1 segundo.
+El parámetro `DELAY_ENTRE_ACCIONES_SEGUNDOS` en `.env` controla esta pausa. Por defecto es 1 segundo.
 
 **Comportamiento:**
 
-- Antes de cada interacción con un elemento (seleccionar, rellenar, click), el script espera `delay_entre_acciones_segundos`.
+- Antes de cada interacción con un elemento (seleccionar, rellenar, click), el script espera `DELAY_ENTRE_ACCIONES_SEGUNDOS`.
 - La espera se aplica ENTRE acciones dentro de un mismo formulario, no solo entre formularios.
-- La espera entre reintentos completos (cuando no hay citas) es un parámetro separado: `intervalo_reintento_segundos`.
+- La espera entre reintentos completos (cuando no hay citas) es un parámetro separado: `INTERVALO_REINTENTO_SEGUNDOS`.
 
 **Ejemplo con delay de 1 segundo:**
 
@@ -354,6 +354,12 @@ La configuración se divide en dos archivos:
 NIE=X1234567A
 NOMBRE=NOMBRE APELLIDO1 APELLIDO2
 
+# Depuración (OPCIONAL — empezar desde un paso concreto, 1-5)
+# Útil para depurar sin navegar todos los formularios desde el inicio.
+# El navegador debe estar ya en la página del paso indicado.
+# 1=Provincia, 2=Trámite, 3=Aviso, 4=Datos personales, 5=Solicitar cita
+PASO_INICIO=1
+
 # Cadencia (OPCIONAL — valores por defecto si no se especifican)
 INTERVALO_REINTENTO_SEGUNDOS=60
 DELAY_ENTRE_ACCIONES_SEGUNDOS=1.0
@@ -362,7 +368,26 @@ TIMEOUT_CARGA_PAGINA_SEGUNDOS=15
 
 El archivo `.env` NO se sube al repositorio (está en `.gitignore`). El usuario lo crea manualmente y rellena sus datos.
 
-El script valida al arrancar que `NIE` y `NOMBRE` existen y no están vacíos. Si faltan, muestra un error descriptivo y se cierra.
+El script valida al arrancar que `NIE` y `NOMBRE` existen y no están vacíos, y que `PASO_INICIO` está entre 1 y 5. Si alguna validación falla, muestra un error descriptivo y se cierra.
+
+| Variable | Obligatorio | Descripción | Valor por defecto |
+|---|---|---|---|
+| `NIE` | Sí | Número de identidad de extranjero | — |
+| `NOMBRE` | Sí | Nombre y apellidos completos | — |
+| `PASO_INICIO` | No | Paso desde el que empezar (1-5). Para depuración. | `1` |
+| `INTERVALO_REINTENTO_SEGUNDOS` | No | Segundos entre reintentos cuando no hay cita | `60` |
+| `DELAY_ENTRE_ACCIONES_SEGUNDOS` | No | Segundos entre cada acción del formulario | `1.0` |
+| `TIMEOUT_CARGA_PAGINA_SEGUNDOS` | No | Timeout de espera de carga de página | `15` |
+
+#### Modo depuración con `PASO_INICIO`
+
+Cuando `PASO_INICIO` es mayor que 1, el script:
+
+1. **No navega a la URL de inicio** — asume que el navegador ya está en la página correcta.
+2. **Salta los formularios anteriores** al paso indicado.
+3. **Ejecuta desde el paso indicado** en adelante con normalidad.
+
+Esto permite depurar pasos concretos sin interactuar con el portal real en los pasos previos. El usuario debe posicionar manualmente el navegador en la página del paso correspondiente antes de ejecutar el script.
 
 ### 11.2. Archivo `config.json` — IDs de elementos HTML (no tocar)
 
@@ -471,6 +496,13 @@ Todos los IDs de elementos han sido identificados y verificados:
 
 URL de inicio: `https://icp.administracionelectronica.gob.es/icpplus/index.html`
 
-## 17. Próximo paso
+## 17. Estructura del proyecto
 
-Implementar `cita_bot.py`. El usuario debe crear su archivo `.env` con NIE y nombre antes de ejecutar (ver sección 5.4).
+```
+surftbrowsing/
+├── cita_bot.py        # Script principal
+├── config.json        # IDs de elementos HTML del portal
+├── .env.example       # Plantilla de configuración personal
+├── .env               # Configuración personal (no se sube al repo)
+└── README.md          # Este documento
+```
