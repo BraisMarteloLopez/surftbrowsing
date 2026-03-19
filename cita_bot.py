@@ -17,6 +17,7 @@ import os
 import sys
 import urllib.request
 from datetime import datetime
+from enum import Enum
 
 from dotenv import load_dotenv
 
@@ -35,6 +36,36 @@ TIMEOUT_PAGINA = float(os.getenv("TIMEOUT_CARGA_PAGINA_SEGUNDOS", "15"))
 
 CDP_PORT = 9222
 CDP_URL = f"http://localhost:{CDP_PORT}/json"
+
+# Timeouts diferenciados (Fase 7 — TD-12)
+TIMEOUT_NAVEGACION = TIMEOUT_PAGINA  # 15s — para Page.navigate + load
+TIMEOUT_JS = 5.0                     # 5s — para Runtime.evaluate simples
+TIMEOUT_KEEPALIVE = 3.0              # 3s — para operaciones de keep-alive
+
+
+# ---------------------------------------------------------------------------
+# Utilidades
+# ---------------------------------------------------------------------------
+
+def safe_js_string(value: str) -> str:
+    """Escapa un string para interpolación segura dentro de un literal JS con comillas simples."""
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+        .replace("\0", "\\0")
+    )
+
+
+class EstadoPagina(Enum):
+    """Resultado de evaluar la página tras solicitar cita."""
+    NO_HAY_CITAS = "no_hay_citas"
+    HAY_CITAS = "hay_citas"
+    DESCONOCIDO = "desconocido"
+
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -90,6 +121,11 @@ class CDPSession:
         self._callbacks: dict[int, asyncio.Future] = {}
         self._events: dict[str, list[asyncio.Future]] = {}
         self._listener_task = None
+        self._alive = True
+
+    @property
+    def is_alive(self) -> bool:
+        return self._alive
 
     async def start(self):
         self._listener_task = asyncio.create_task(self._listen())
@@ -108,10 +144,25 @@ class CDPSession:
                         for fut in self._events.pop(method):
                             if not fut.done():
                                 fut.set_result(msg)
-        except Exception:
-            pass
+        except Exception as e:
+            log_info(f"Listener CDP desconectado: {type(e).__name__}: {e}")
+        finally:
+            self._alive = False
+            # Resolver todos los Futures pendientes con error
+            for fut in self._callbacks.values():
+                if not fut.done():
+                    fut.set_exception(ConnectionError("Sesión CDP desconectada"))
+            self._callbacks.clear()
+            for futs in self._events.values():
+                for fut in futs:
+                    if not fut.done():
+                        fut.set_exception(ConnectionError("Sesión CDP desconectada"))
+            self._events.clear()
 
-    async def send(self, method: str, params: dict | None = None) -> dict:
+    async def send(self, method: str, params: dict | None = None,
+                   timeout: float | None = None) -> dict:
+        if not self._alive:
+            raise ConnectionError("Sesión CDP desconectada")
         self._id += 1
         msg_id = self._id
         payload = {"id": msg_id, "method": method}
@@ -121,10 +172,13 @@ class CDPSession:
         fut = asyncio.get_event_loop().create_future()
         self._callbacks[msg_id] = fut
         await self._ws.send(json.dumps(payload))
-        return await asyncio.wait_for(fut, timeout=TIMEOUT_PAGINA)
+        t = timeout if timeout is not None else TIMEOUT_PAGINA
+        return await asyncio.wait_for(fut, timeout=t)
 
     def pre_wait_event(self, event: str) -> asyncio.Future:
         """Pre-registra un Future para un evento ANTES de que ocurra."""
+        if not self._alive:
+            raise ConnectionError("Sesión CDP desconectada")
         fut = asyncio.get_event_loop().create_future()
         self._events.setdefault(event, []).append(fut)
         return fut
@@ -149,13 +203,14 @@ class CDPSession:
                 pass
 
 
-async def ejecutar_js(cdp: CDPSession, expression: str) -> dict:
+async def ejecutar_js(cdp: CDPSession, expression: str,
+                      timeout: float = TIMEOUT_JS) -> dict:
     """Ejecuta JavaScript en la página y devuelve el resultado."""
     result = await cdp.send("Runtime.evaluate", {
         "expression": expression,
         "returnByValue": True,
         "awaitPromise": False,
-    })
+    }, timeout=timeout)
     if "exceptionDetails" in result.get("result", {}):
         raise RuntimeError(f"Error JS: {result['result']['exceptionDetails']}")
     return result.get("result", {}).get("result", {})
@@ -201,9 +256,9 @@ async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
     log("Formulario 1: seleccionando provincia Madrid")
     await delay()
 
-    dropdown_id = ids["dropdown_provincia"]
-    valor = ids["valor_madrid"]
-    boton_id = ids["boton_aceptar_f1"]
+    dropdown_id = safe_js_string(ids["dropdown_provincia"])
+    valor = safe_js_string(ids["valor_madrid"])
+    boton_id = safe_js_string(ids["boton_aceptar_f1"])
 
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
@@ -220,9 +275,9 @@ async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
     log("Formulario 2: seleccionando trámite")
     await delay()
 
-    dropdown_id = ids["dropdown_tramite"]
-    valor = ids["valor_tramite"]
-    boton_id = ids["boton_aceptar_f2"]
+    dropdown_id = safe_js_string(ids["dropdown_tramite"])
+    valor = safe_js_string(ids["valor_tramite"])
+    boton_id = safe_js_string(ids["boton_aceptar_f2"])
 
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
@@ -239,7 +294,7 @@ async def paso_formulario_3(cdp: CDPSession, ids: dict) -> None:
     log("Formulario 3: aceptando aviso")
     await delay()
 
-    boton_id = ids["boton_entrar_f3"]
+    boton_id = safe_js_string(ids["boton_entrar_f3"])
     log("Formulario 3: aviso aceptado, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -249,20 +304,21 @@ async def paso_formulario_4(cdp: CDPSession, ids: dict) -> None:
     log("Formulario 4: rellenando datos personales")
     await delay()
 
-    input_nie = ids["input_nie"]
-    input_nombre = ids["input_nombre"]
-    boton_id = ids["boton_aceptar_f4"]
+    input_nie = safe_js_string(ids["input_nie"])
+    input_nombre = safe_js_string(ids["input_nombre"])
+    boton_id = safe_js_string(ids["boton_aceptar_f4"])
 
     # NIE
+    nie_escaped = safe_js_string(NIE)
     await ejecutar_js(cdp, f"""
-        document.getElementById('{input_nie}').value = '{NIE}';
+        document.getElementById('{input_nie}').value = '{nie_escaped}';
         document.getElementById('{input_nie}').dispatchEvent(new Event('input', {{ bubbles: true }}));
     """)
 
     await delay()
 
-    # Nombre — escapar comillas simples por seguridad
-    nombre_escaped = NOMBRE.replace("'", "\\'")
+    # Nombre
+    nombre_escaped = safe_js_string(NOMBRE)
     await ejecutar_js(cdp, f"""
         document.getElementById('{input_nombre}').value = '{nombre_escaped}';
         document.getElementById('{input_nombre}').dispatchEvent(new Event('change', {{ bubbles: true }}));
@@ -278,7 +334,7 @@ async def paso_formulario_5(cdp: CDPSession, ids: dict) -> None:
     log("Formulario 5: solicitando cita")
     await delay()
 
-    boton_id = ids["boton_solicitar_cita"]
+    boton_id = safe_js_string(ids["boton_solicitar_cita"])
     log("Formulario 5: cita solicitada, esperando respuesta...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -287,19 +343,54 @@ async def paso_formulario_5(cdp: CDPSession, ids: dict) -> None:
 # Detección de disponibilidad
 # ---------------------------------------------------------------------------
 
-async def hay_cita_disponible(cdp: CDPSession, ids: dict) -> bool:
-    """Comprueba si la página muestra el mensaje de 'no hay citas'."""
-    texto_no_citas = ids["texto_no_hay_citas"]
-    result = await ejecutar_js(cdp, f"""
-        document.body.innerText.includes('{texto_no_citas}');
+async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
+    """Evalúa el estado de la página tras solicitar cita.
+
+    Verifica múltiples señales para evitar falsos positivos:
+    1. Presencia del texto "no hay citas" (case-insensitive, parcial).
+    2. Existencia de elementos conocidos (botón Salir).
+    3. Contenido mínimo en el body (página no vacía/error).
+    4. URL coherente con el flujo del portal.
+    """
+    # 1. Espera breve para asegurar render completo
+    await asyncio.sleep(1)
+
+    # 2. Verificar que la página tiene contenido sustancial
+    body_length = await ejecutar_js(cdp, "document.body.innerText.length;")
+    if body_length.get("value", 0) < 50:
+        log("Estado: página con contenido insuficiente (<50 chars)")
+        return EstadoPagina.DESCONOCIDO
+
+    # 3. Buscar texto de "no hay citas" (case-insensitive, parcial)
+    texto_check = await ejecutar_js(cdp, """
+        document.body.innerText.toLowerCase().includes('no hay citas disponibles');
     """)
-    no_hay = result.get("value", False)
-    return not no_hay
+    if texto_check.get("value", False):
+        # 4. Confirmar que el botón Salir existe (estamos en la página correcta)
+        boton_salir = safe_js_string(ids["boton_salir_nocita"])
+        boton_existe = await ejecutar_js(cdp, f"""
+            document.getElementById('{boton_salir}') !== null;
+        """)
+        if boton_existe.get("value", False):
+            return EstadoPagina.NO_HAY_CITAS
+        # Texto presente pero sin botón Salir → estado incierto
+        log("Estado: texto 'no hay citas' encontrado pero sin botón Salir")
+        return EstadoPagina.DESCONOCIDO
+
+    # 5. Verificar que la URL pertenece al flujo del portal
+    url_check = await ejecutar_js(cdp, "window.location.href;")
+    current_url = url_check.get("value", "")
+    if "icpplus" not in current_url and "icpplustiem" not in current_url:
+        log(f"Estado: URL inesperada: {current_url}")
+        return EstadoPagina.DESCONOCIDO
+
+    # 6. No se encontró "no hay citas" + URL válida + contenido sustancial → posible cita
+    return EstadoPagina.HAY_CITAS
 
 
 async def click_salir(cdp: CDPSession, ids: dict) -> None:
     """Click en botón Salir de la página sin citas."""
-    boton_id = ids["boton_salir_nocita"]
+    boton_id = safe_js_string(ids["boton_salir_nocita"])
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 
@@ -325,10 +416,15 @@ async def alerta_sonora() -> None:
 
 
 async def mantener_sesion(cdp: CDPSession) -> None:
-    """Keep-alive: lee un elemento del DOM cada 30s para evitar timeout de sesión."""
+    """Keep-alive: genera tráfico HTTP real cada 30s para mantener sesión server-side."""
     while True:
         try:
-            await ejecutar_js(cdp, "document.title;")
+            await ejecutar_js(cdp, """
+                fetch(window.location.href, {
+                    method: 'HEAD',
+                    credentials: 'same-origin'
+                }).catch(function(){});
+            """, timeout=TIMEOUT_KEEPALIVE)
         except Exception:
             pass
         await asyncio.sleep(30)
@@ -338,10 +434,11 @@ async def mantener_sesion(cdp: CDPSession) -> None:
 # Bucle principal
 # ---------------------------------------------------------------------------
 
-async def ciclo_completo(cdp: CDPSession, ids: dict, paso_hasta: int = 5) -> bool | None:
+async def ciclo_completo(cdp: CDPSession, ids: dict,
+                         paso_hasta: int = 5) -> EstadoPagina | None:
     """Ejecuta formularios desde el paso 0 hasta paso_hasta (inclusive).
 
-    Devuelve True si hay cita, False si no hay, o None si se detuvo antes
+    Devuelve EstadoPagina con el resultado, o None si se detuvo antes
     del paso 5 (modo depuración).
     """
     pasos = [
@@ -358,11 +455,21 @@ async def ciclo_completo(cdp: CDPSession, ids: dict, paso_hasta: int = 5) -> boo
             return None
         await fn(cdp, ids)
 
-    if await hay_cita_disponible(cdp, ids):
-        return True
+    estado = await evaluar_estado_pagina(cdp, ids)
+    return estado
 
-    log("Resultado: NO HAY CITAS")
-    return False
+
+async def conectar_brave() -> tuple:
+    """Conecta a Brave via CDP y devuelve (ws, cdp) listos para usar."""
+    import websockets
+
+    ws_url = await obtener_ws_url()
+    log_info(f"WebSocket: {ws_url}")
+    ws = await websockets.connect(ws_url, max_size=10 * 1024 * 1024)
+    cdp = CDPSession(ws)
+    await cdp.start()
+    await cdp.send("Page.enable")
+    return ws, cdp
 
 
 async def main() -> None:
@@ -401,69 +508,95 @@ async def main() -> None:
 
     # Conectar a Brave
     log_info("Conectando a Brave via CDP...")
-    ws_url = await obtener_ws_url()
-    log_info(f"WebSocket: {ws_url}")
+    ws, cdp = await conectar_brave()
+    log_info("Conectado a Brave. Iniciando bucle de búsqueda de cita...")
 
-    import websockets
-    async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
-        cdp = CDPSession(ws)
-        await cdp.start()
-        await cdp.send("Page.enable")
+    while True:
+        _intento += 1
 
-        log_info("Conectado a Brave. Iniciando bucle de búsqueda de cita...")
+        try:
+            # Verificar conexión CDP antes de cada ciclo
+            if not cdp.is_alive:
+                log("Conexión CDP perdida. Reconectando...")
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+                await asyncio.sleep(2)
+                ws, cdp = await conectar_brave()
+                log_info("Reconexión exitosa.")
 
-        while True:
-            _intento += 1
+            # Paso 0: Navegar al inicio
+            log("Navegando a URL de inicio...")
+            await navegar(cdp, url_inicio)
+            log("Página cargada")
 
-            try:
-                # Paso 0: Navegar al inicio
-                log("Navegando a URL de inicio...")
-                await navegar(cdp, url_inicio)
-                log("Página cargada")
+            if PASO_HASTA == 0:
+                log("Detenido en paso 0 (PASO_HASTA=0) — solo navegación")
+                log_info("Modo depuración finalizado.")
+                return
 
-                if PASO_HASTA == 0:
-                    log("Detenido en paso 0 (PASO_HASTA=0) — solo navegación")
-                    log_info("Modo depuración finalizado.")
-                    return
+            # Pasos 1-5: Formularios
+            resultado = await ciclo_completo(cdp, ids, PASO_HASTA)
 
-                # Pasos 1-5: Formularios
-                resultado = await ciclo_completo(cdp, ids, PASO_HASTA)
+            if resultado is None:
+                # Modo depuración: se detuvo antes del paso 5
+                log_info("Modo depuración finalizado.")
+                return
 
-                if resultado is None:
-                    # Modo depuración: se detuvo antes del paso 5
-                    log_info("Modo depuración finalizado.")
-                    return
+            if resultado == EstadoPagina.HAY_CITAS:
+                print()
+                print("=" * 60)
+                log("*** CITA DISPONIBLE *** — Toma el control del navegador")
+                print("=" * 60)
+                print()
 
-                if resultado:
-                    print()
-                    print("=" * 60)
-                    log("*** CITA DISPONIBLE *** — Toma el control del navegador")
-                    print("=" * 60)
-                    print()
-
-                    # Mantener sesión + alerta en paralelo
-                    await asyncio.gather(
-                        alerta_sonora(),
-                        mantener_sesion(cdp),
-                    )
-                else:
-                    log(f"Reintentando en {INTERVALO_REINTENTO}s...")
+                # Mantener sesión + alerta en paralelo
+                await asyncio.gather(
+                    alerta_sonora(),
+                    mantener_sesion(cdp),
+                )
+            elif resultado == EstadoPagina.NO_HAY_CITAS:
+                log("Resultado: NO HAY CITAS")
+                log(f"Reintentando en {INTERVALO_REINTENTO}s...")
+                try:
                     await click_salir(cdp, ids)
-                    await asyncio.sleep(INTERVALO_REINTENTO)
+                except (RuntimeError, asyncio.TimeoutError) as e:
+                    log(f"Aviso: click_salir() falló ({e}). Continuando con navegación directa.")
+                await asyncio.sleep(INTERVALO_REINTENTO)
+            else:
+                # EstadoPagina.DESCONOCIDO
+                log("ADVERTENCIA: Estado de página no reconocido. Posible error del portal.")
+                log("Reiniciando ciclo en 15s...")
+                await asyncio.sleep(15)
 
-            except asyncio.TimeoutError:
-                log("Timeout en carga de página. Reiniciando ciclo...")
-                await asyncio.sleep(5)
+        except ConnectionError as e:
+            log(f"Conexión perdida: {e}. Reconectando en 5s...")
+            await asyncio.sleep(5)
+            try:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+                ws, cdp = await conectar_brave()
+                log_info("Reconexión exitosa.")
+            except Exception as e2:
+                log(f"Reconexión fallida: {e2}. Reintentando en 15s...")
+                await asyncio.sleep(15)
 
-            except RuntimeError as e:
-                log(f"Error JS: {e}")
-                log("Reiniciando ciclo en 10s...")
-                await asyncio.sleep(10)
+        except asyncio.TimeoutError:
+            log("Timeout en carga de página. Reiniciando ciclo...")
+            await asyncio.sleep(5)
 
-            except Exception as e:
-                log(f"Error inesperado: {type(e).__name__}: {e}")
-                log("Reiniciando ciclo en 10s...")
-                await asyncio.sleep(10)
+        except RuntimeError as e:
+            log(f"Error JS: {e}")
+            log("Reiniciando ciclo en 10s...")
+            await asyncio.sleep(10)
+
+        except Exception as e:
+            log(f"Error inesperado: {type(e).__name__}: {e}")
+            log("Reiniciando ciclo en 10s...")
+            await asyncio.sleep(10)
 
 
 if __name__ == "__main__":
