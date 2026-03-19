@@ -1,0 +1,18 @@
+{
+    "url_inicio": "https://icp.administracionelectronica.gob.es/icpplus/index.html",
+    "ids": {
+        "dropdown_provincia": "form",
+        "valor_madrid": "/icpplustiem/citar?p=28&locale=es",
+        "boton_aceptar_f1": "btnAceptar",
+        "dropdown_tramite": "tramiteGrupo[0]",
+        "valor_tramite": "4112",
+        "boton_aceptar_f2": "btnAceptar",
+        "boton_entrar_f3": "btnEntrar",
+        "input_nie": "txtIdCitado",
+        "input_nombre": "txtDesCitado",
+        "boton_aceptar_f4": "btnEnviar",
+        "boton_solicitar_cita": "btnEnviar",
+        "boton_salir_nocita": "btnSalir",
+        "texto_no_hay_citas": "En este momento no hay citas disponibles."
+    }
+}
