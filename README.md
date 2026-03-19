@@ -89,20 +89,12 @@ O buscar "Brave" en el menú de inicio, click derecho → "Abrir ubicación del 
 Cerrar todas las ventanas de Brave antes de ejecutar este comando. Si Brave ya está corriendo, el flag `--remote-debugging-port` se ignora silenciosamente.
 
 ```
-"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" --remote-debugging-port=9222
+"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" --remote-debugging-port=9222 --ignore-certificate-errors
 ```
 
 Sustituir la ruta por la correcta de tu instalación.
 
-> **Si aparece el error "La conexión no es privada" (`NET::ERR_CERT_AUTHORITY_INVALID`):**
->
-> El portal ICP puede presentar problemas de certificado SSL. Si Brave bloquea el acceso (especialmente con HSTS, donde no aparece la opción "Avanzado → Continuar"), relanzar Brave con el flag adicional `--ignore-certificate-errors`:
->
-> ```
-> "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" --remote-debugging-port=9222 --ignore-certificate-errors
-> ```
->
-> Este flag desactiva la validación de certificados SSL. Usarlo **solo** mientras se ejecuta el bot, y no para navegación general.
+> **Nota sobre `--ignore-certificate-errors`:** El portal ICP puede presentar errores de certificado SSL (`NET::ERR_CERT_AUTHORITY_INVALID`) que Brave bloquea sin opción de continuar (HSTS). Este flag desactiva la validación de certificados. Usarlo **solo** mientras se ejecuta el bot, y no para navegación general.
 
 ### 5.3. Verificar que CDP funciona
 
