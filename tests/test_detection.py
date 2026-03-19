@@ -44,7 +44,6 @@ async def test_no_hay_citas_texto_exacto(mock_sleep, mock_ejs, sample_ids):
     mock_ejs.side_effect = _make_ejecutar_js_mock([
         {"value": 200},                # body length
         {"value": True},               # includes 'no hay citas disponibles'
-        {"value": True},               # botón Salir existe
     ])
     result = await evaluar_estado_pagina(cdp, sample_ids)
     assert result == EstadoPagina.NO_HAY_CITAS
@@ -111,16 +110,15 @@ async def test_url_inesperada_es_desconocido(mock_sleep, mock_ejs, sample_ids):
 @pytest.mark.asyncio
 @patch("cita_bot.ejecutar_js")
 @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-async def test_sin_boton_salir_es_desconocido(mock_sleep, mock_ejs, sample_ids):
-    """Texto 'no hay citas' pero sin botón Salir → DESCONOCIDO."""
+async def test_sin_boton_salir_sigue_siendo_no_hay_citas(mock_sleep, mock_ejs, sample_ids):
+    """Texto 'no hay citas' sin botón Salir → NO_HAY_CITAS (el texto es la señal definitiva)."""
     cdp = AsyncMock(spec=CDPSession)
     mock_ejs.side_effect = _make_ejecutar_js_mock([
         {"value": 200},                # body length
         {"value": True},               # incluye 'no hay citas disponibles'
-        {"value": False},              # botón Salir NO existe
     ])
     result = await evaluar_estado_pagina(cdp, sample_ids)
-    assert result == EstadoPagina.DESCONOCIDO
+    assert result == EstadoPagina.NO_HAY_CITAS
 
 
 @pytest.mark.asyncio

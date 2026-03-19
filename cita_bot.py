@@ -458,9 +458,8 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
 
     Verifica múltiples señales para evitar falsos positivos:
     1. Presencia del texto "no hay citas" (case-insensitive, parcial).
-    2. Existencia de elementos conocidos (botón Salir).
-    3. Contenido mínimo en el body (página no vacía/error).
-    4. URL coherente con el flujo del portal.
+    2. Contenido mínimo en el body (página no vacía/error).
+    3. URL coherente con el flujo del portal.
     """
     # 1. Espera aleatoria para simular lectura humana tras carga
     await asyncio.sleep(random.uniform(DELAY_EVALUACION_MIN, DELAY_EVALUACION_MAX))
@@ -477,16 +476,10 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
         document.body.innerText.toLowerCase().includes('{texto_buscar}');
     """)
     if texto_check.get("value", False):
-        # 4. Confirmar que el botón Salir existe (estamos en la página correcta)
-        boton_salir = safe_js_string(ids["boton_salir_nocita"])
-        boton_existe = await ejecutar_js(cdp, f"""
-            document.getElementById('{boton_salir}') !== null;
-        """)
-        if boton_existe.get("value", False):
-            return EstadoPagina.NO_HAY_CITAS
-        # Texto presente pero sin botón Salir → estado incierto
-        log("Estado: texto 'no hay citas' encontrado pero sin botón Salir")
-        return EstadoPagina.DESCONOCIDO
+        # El texto "no hay citas" es la señal definitiva del estado.
+        # El botón Salir puede tardar en renderizarse o haber cambiado de ID;
+        # click_salir() ya maneja su ausencia con fallback graceful.
+        return EstadoPagina.NO_HAY_CITAS
 
     # 5. Verificar que la URL pertenece al flujo del portal
     url_check = await ejecutar_js(cdp, "window.location.href;")
