@@ -32,21 +32,21 @@ load_dotenv()
 NIE = os.getenv("NIE", "").strip()
 NOMBRE = os.getenv("NOMBRE", "").strip()
 PASO_HASTA = int(os.getenv("PASO_HASTA", "5"))
-INTERVALO_REINTENTO = float(os.getenv("INTERVALO_REINTENTO_SEGUNDOS", "60"))
+INTERVALO_REINTENTO = float(os.getenv("INTERVALO_REINTENTO_SEGUNDOS", "120"))
 TIMEOUT_PAGINA = float(os.getenv("TIMEOUT_CARGA_PAGINA_SEGUNDOS", "15"))
 
 # Delays configurables: cada uno con base + varianza aditiva
 # Acciones de formulario (click, select, etc.)
-DELAY_ACCION_BASE = float(os.getenv("DELAY_ACCION_BASE", "1.0"))
-DELAY_ACCION_VARIANZA = max(float(os.getenv("DELAY_ACCION_VARIANZA", "0.5")), 0.0)
+DELAY_ACCION_BASE = float(os.getenv("DELAY_ACCION_BASE", "2.0"))
+DELAY_ACCION_VARIANZA = max(float(os.getenv("DELAY_ACCION_VARIANZA", "0.8")), 0.0)
 
 # Scroll humano entre pasos de scroll
-DELAY_SCROLL_MIN = float(os.getenv("DELAY_SCROLL_MIN", "0.4"))
-DELAY_SCROLL_MAX = float(os.getenv("DELAY_SCROLL_MAX", "1.2"))
+DELAY_SCROLL_MIN = float(os.getenv("DELAY_SCROLL_MIN", "0.8"))
+DELAY_SCROLL_MAX = float(os.getenv("DELAY_SCROLL_MAX", "2.0"))
 
 # Lectura de página antes de evaluar resultado
-DELAY_EVALUACION_MIN = float(os.getenv("DELAY_EVALUACION_MIN", "1.0"))
-DELAY_EVALUACION_MAX = float(os.getenv("DELAY_EVALUACION_MAX", "3.0"))
+DELAY_EVALUACION_MIN = float(os.getenv("DELAY_EVALUACION_MIN", "2.0"))
+DELAY_EVALUACION_MAX = float(os.getenv("DELAY_EVALUACION_MAX", "5.0"))
 
 # Timeout para esperar que un elemento aparezca en el DOM
 TIMEOUT_ESPERA_ELEMENTO = float(os.getenv("TIMEOUT_ESPERA_ELEMENTO_SEGUNDOS", "10"))
@@ -76,11 +76,17 @@ def safe_js_string(value: str) -> str:
     )
 
 
+class WafBanError(Exception):
+    """Excepción lanzada cuando se detecta un bloqueo WAF."""
+    pass
+
+
 class EstadoPagina(Enum):
     """Resultado de evaluar la página tras solicitar cita."""
     NO_HAY_CITAS = "no_hay_citas"
     HAY_CITAS = "hay_citas"
     DESCONOCIDO = "desconocido"
+    WAF_BANEADO = "waf_baneado"
 
 
 class BackoffController:
@@ -325,12 +331,41 @@ async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
         await cdp.wait_future(load_fut, timeout=TIMEOUT_NAVEGACION)
     except asyncio.TimeoutError:
         log("Timeout esperando carga de página, continuando...")
+    # Detectar ban WAF tras cada carga de página
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF ha bloqueado la petición")
+
+
+async def detectar_waf(cdp: CDPSession) -> bool:
+    """Detecta si la página actual es un bloqueo de WAF (F5 BIG-IP, etc.).
+
+    Busca patrones comunes de páginas de rechazo WAF:
+    - "The requested URL was rejected"
+    - "Your support ID is"
+    """
+    try:
+        result = await ejecutar_js(cdp, "document.body.innerText;")
+        texto = result.get("value", "")
+        if not texto:
+            return False
+        texto_lower = texto.lower()
+        return (
+            "the requested url was rejected" in texto_lower
+            or ("your support id is" in texto_lower and "consult" in texto_lower)
+        )
+    except Exception:
+        return False
 
 
 async def delay() -> None:
     """Pausa aleatoria entre acciones para simular comportamiento humano."""
     extra = DELAY_ACCION_BASE * random.uniform(0, DELAY_ACCION_VARIANZA)
     await asyncio.sleep(DELAY_ACCION_BASE + extra)
+
+
+async def pausa_entre_pasos() -> None:
+    """Pausa más larga entre pasos de formulario para simular lectura/pensamiento."""
+    await asyncio.sleep(random.uniform(2.0, 5.0))
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +604,13 @@ async def ciclo_completo(cdp: CDPSession, ids: dict,
             log(f"Detenido en paso {paso_hasta} (PASO_HASTA={paso_hasta})")
             return None
         await fn(cdp, ids)
+        # Pausa entre formularios para simular lectura humana
+        if num < paso_hasta and num < 5:
+            await pausa_entre_pasos()
+
+    # Detectar ban WAF antes de evaluar resultado
+    if await detectar_waf(cdp):
+        return EstadoPagina.WAF_BANEADO
 
     estado = await evaluar_estado_pagina(cdp, ids)
     return estado
@@ -631,6 +673,11 @@ async def main() -> None:
         max_intervalo=300.0,
         umbral_alerta=10,
     )
+    waf_backoff = BackoffController(
+        intervalo_base=300.0,   # 5 min mínimo tras primer ban
+        max_intervalo=900.0,    # 15 min máximo
+        umbral_alerta=3,
+    )
 
     skip_navegacion = False
 
@@ -658,6 +705,17 @@ async def main() -> None:
                 log("Navegando a URL de inicio...")
                 await navegar(cdp, url_inicio)
 
+                # Detectar ban WAF antes de continuar
+                if await detectar_waf(cdp):
+                    espera = waf_backoff.registrar_error("waf")
+                    minutos = espera / 60
+                    log(f"*** WAF DETECTADO *** Baneado por el firewall del portal.")
+                    log(f"Esperando {minutos:.1f} minutos antes de reintentar... (ban #{waf_backoff.errores_consecutivos})")
+                    if waf_backoff.debe_alertar:
+                        log("ALERTA: Baneado demasiadas veces. Considera aumentar INTERVALO_REINTENTO_SEGUNDOS.")
+                    await asyncio.sleep(espera)
+                    continue
+
                 # Verificar que la navegación llegó al destino correcto
                 if not await verificar_url(cdp, url_inicio):
                     log("ADVERTENCIA: URL post-navegación no coincide con el inicio.")
@@ -681,8 +739,20 @@ async def main() -> None:
                 log_info("Modo depuración finalizado.")
                 return
 
+            if resultado == EstadoPagina.WAF_BANEADO:
+                skip_navegacion = False
+                espera = waf_backoff.registrar_error("waf")
+                minutos = espera / 60
+                log(f"*** WAF DETECTADO *** Baneado durante el flujo de formularios.")
+                log(f"Esperando {minutos:.1f} minutos antes de reintentar... (ban #{waf_backoff.errores_consecutivos})")
+                if waf_backoff.debe_alertar:
+                    log("ALERTA: Baneado demasiadas veces. Considera aumentar INTERVALO_REINTENTO_SEGUNDOS.")
+                await asyncio.sleep(espera)
+                continue
+
             if resultado == EstadoPagina.HAY_CITAS:
                 backoff.registrar_exito()
+                waf_backoff.registrar_exito()
                 print()
                 print("=" * 60)
                 log("*** CITA DISPONIBLE *** — Toma el control del navegador")
@@ -693,6 +763,7 @@ async def main() -> None:
                 await alerta_sonora()
             elif resultado == EstadoPagina.NO_HAY_CITAS:
                 backoff.registrar_exito()
+                waf_backoff.registrar_exito()
                 log("Resultado: NO HAY CITAS")
                 if await click_salir(cdp, ids):
                     skip_navegacion = True
@@ -707,6 +778,16 @@ async def main() -> None:
                     log("ALERTA: Demasiados estados desconocidos. Posible cambio en el portal.")
                 log(f"Reiniciando ciclo en {espera:.0f}s...")
                 await asyncio.sleep(espera)
+
+        except WafBanError:
+            skip_navegacion = False
+            espera = waf_backoff.registrar_error("waf")
+            minutos = espera / 60
+            log(f"*** WAF DETECTADO *** Baneado durante navegación de formularios.")
+            log(f"Esperando {minutos:.1f} minutos antes de reintentar... (ban #{waf_backoff.errores_consecutivos})")
+            if waf_backoff.debe_alertar:
+                log("ALERTA: Baneado demasiadas veces. Considera aumentar INTERVALO_REINTENTO_SEGUNDOS.")
+            await asyncio.sleep(espera)
 
         except ConnectionError as e:
             skip_navegacion = False

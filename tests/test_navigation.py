@@ -10,12 +10,12 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cita_bot import (
-    CDPSession, EstadoPagina,
+    CDPSession, EstadoPagina, WafBanError,
     navegar, click_y_esperar_carga, scroll_humano, verificar_url,
-    esperar_elemento, click_salir, delay,
+    esperar_elemento, click_salir, delay, pausa_entre_pasos,
     paso_formulario_1, paso_formulario_2, paso_formulario_3,
     paso_formulario_4, paso_formulario_5,
-    ciclo_completo, evaluar_estado_pagina,
+    ciclo_completo, evaluar_estado_pagina, detectar_waf,
     safe_js_string, ejecutar_js, intervalo_con_jitter,
 )
 
@@ -91,8 +91,9 @@ class TestNavegar:
 
 class TestClickYEsperarCarga:
     @pytest.mark.asyncio
+    @patch("cita_bot.detectar_waf", new_callable=AsyncMock, return_value=False)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_click_y_carga_normal(self, mock_ejs):
+    async def test_click_y_carga_normal(self, mock_ejs, mock_waf):
         cdp = AsyncMock(spec=CDPSession)
         load_fut = asyncio.Future()
         load_fut.set_result({"method": "Page.loadEventFired"})
@@ -103,8 +104,9 @@ class TestClickYEsperarCarga:
         mock_ejs.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch("cita_bot.detectar_waf", new_callable=AsyncMock, return_value=False)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_click_timeout_continua(self, mock_ejs):
+    async def test_click_timeout_continua(self, mock_ejs, mock_waf):
         """Si wait_future da timeout, continúa sin error."""
         cdp = AsyncMock(spec=CDPSession)
         load_fut = asyncio.Future()
@@ -113,6 +115,20 @@ class TestClickYEsperarCarga:
 
         await click_y_esperar_carga(cdp, "btn.click();")
         # No lanza excepción
+
+    @pytest.mark.asyncio
+    @patch("cita_bot.detectar_waf", new_callable=AsyncMock, return_value=True)
+    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    async def test_click_waf_detectado_lanza_error(self, mock_ejs, mock_waf):
+        """Si detectar_waf devuelve True tras carga, lanza WafBanError."""
+        cdp = AsyncMock(spec=CDPSession)
+        load_fut = asyncio.Future()
+        load_fut.set_result({"method": "Page.loadEventFired"})
+        cdp.pre_wait_event.return_value = load_fut
+        cdp.wait_future = AsyncMock()
+
+        with pytest.raises(WafBanError):
+            await click_y_esperar_carga(cdp, "btn.click();")
 
 
 # ---------------------------------------------------------------------------

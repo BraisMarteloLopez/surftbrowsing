@@ -1,4 +1,4 @@
-"""Tests para evaluar_estado_pagina() — Fase 4 (TD-02)."""
+"""Tests para evaluar_estado_pagina() y detectar_waf()."""
 
 import asyncio
 from unittest.mock import AsyncMock, patch
@@ -9,7 +9,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cita_bot import EstadoPagina, evaluar_estado_pagina, CDPSession
+from cita_bot import EstadoPagina, evaluar_estado_pagina, detectar_waf, WafBanError, CDPSession
 
 
 def _make_ejecutar_js_mock(responses: list[dict]):
@@ -212,3 +212,65 @@ async def test_texto_positivo_vacio_no_afecta(mock_sleep, mock_ejs):
     ])
     result = await evaluar_estado_pagina(cdp, ids_vacio)
     assert result == EstadoPagina.HAY_CITAS
+
+
+# ---------------------------------------------------------------------------
+# Tests de detección WAF
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+async def test_detectar_waf_pagina_rechazo(mock_ejs):
+    """Página con 'The requested URL was rejected' → True."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.return_value = {
+        "value": "The requested URL was rejected. Please consult with your administrador.\nYour support ID is: <5402685028354251351>\n[Go Back]"
+    }
+    assert await detectar_waf(cdp) is True
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+async def test_detectar_waf_pagina_support_id(mock_ejs):
+    """Página con 'Your support ID is' + 'consult' → True."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.return_value = {
+        "value": "Access denied. Your support ID is: <123456>. Please consult your administrator."
+    }
+    assert await detectar_waf(cdp) is True
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+async def test_detectar_waf_pagina_normal(mock_ejs):
+    """Página normal del portal → False."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.return_value = {
+        "value": "Seleccione la provincia donde desea tramitar su cita."
+    }
+    assert await detectar_waf(cdp) is False
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+async def test_detectar_waf_pagina_vacia(mock_ejs):
+    """Página vacía → False."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.return_value = {"value": ""}
+    assert await detectar_waf(cdp) is False
+
+
+@pytest.mark.asyncio
+@patch("cita_bot.ejecutar_js")
+async def test_detectar_waf_error_js(mock_ejs):
+    """Error en ejecutar_js → False (no crashea)."""
+    cdp = AsyncMock(spec=CDPSession)
+    mock_ejs.side_effect = RuntimeError("JS error")
+    assert await detectar_waf(cdp) is False
+
+
+@pytest.mark.asyncio
+async def test_waf_ban_error_es_exception():
+    """WafBanError es una Exception que se puede capturar."""
+    with pytest.raises(WafBanError):
+        raise WafBanError("test")

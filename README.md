@@ -269,11 +269,32 @@ El parámetro `DELAY_ENTRE_ACCIONES_SEGUNDOS` en `.env` controla esta pausa. Por
 
 **Recomendaciones de ajuste:**
 
-- `1.0` segundo: valor por defecto, conservador, baja probabilidad de detección
-- `0.5` segundos: más agresivo, aceptable para intentos esporádicos
-- `2.0` segundos o más: muy conservador, usar si se sospecha de detección por cadencia
+- `2.0` segundos: valor por defecto, equilibrio entre velocidad y riesgo de detección
+- `1.0` segundo: más agresivo, usar solo si no se observan baneos
+- `3.0` segundos o más: muy conservador, usar si el WAF banea frecuentemente
 
-Un ciclo completo (5 formularios) con delay de 1 segundo tarda aproximadamente 15-20 segundos incluyendo tiempos de carga de página. Con un intervalo de reintento de 60 segundos, el script ejecuta aproximadamente un intento por minuto.
+Además, entre cada paso de formulario se aplica una pausa adicional de 2-5 segundos que simula el tiempo de lectura de un humano.
+
+Un ciclo completo (5 formularios) con delay de 2 segundos tarda aproximadamente 30-45 segundos incluyendo tiempos de carga de página y pausas entre pasos. Con un intervalo de reintento de 120 segundos, el script ejecuta aproximadamente un intento cada 2.5-3 minutos.
+
+### Detección de WAF (Web Application Firewall)
+
+El portal ICP está protegido por un WAF (F5 BIG-IP) que puede bloquear temporalmente la IP si detecta patrones de automatización. Cuando esto ocurre, la página muestra:
+
+```
+The requested URL was rejected. Please consult with your administrador.
+Your support ID is: <número>
+```
+
+El bot detecta automáticamente esta página y aplica un **backoff agresivo**:
+
+| Ban consecutivo | Espera |
+|----------------|--------|
+| 1er ban | 5 minutos |
+| 2do ban | 10 minutos |
+| 3er+ ban | 15 minutos (máximo) |
+
+Tras un ciclo exitoso, el contador de bans se resetea. Si el WAF te banea frecuentemente, aumenta `INTERVALO_REINTENTO_SEGUNDOS` y `DELAY_ACCION_BASE` en `.env`.
 
 ---
 
@@ -388,8 +409,8 @@ NOMBRE=NOMBRE APELLIDO1 APELLIDO2
 PASO_HASTA=5
 
 # Cadencia (OPCIONAL — valores por defecto si no se especifican)
-INTERVALO_REINTENTO_SEGUNDOS=60
-DELAY_ENTRE_ACCIONES_SEGUNDOS=1.0
+INTERVALO_REINTENTO_SEGUNDOS=120
+DELAY_ACCION_BASE=2.0
 TIMEOUT_CARGA_PAGINA_SEGUNDOS=15
 ```
 
@@ -402,8 +423,9 @@ El script valida al arrancar que `NIE` y `NOMBRE` existen y no están vacíos, y
 | `NIE` | Sí | Número de identidad de extranjero | — |
 | `NOMBRE` | Sí | Nombre y apellidos completos | — |
 | `PASO_HASTA` | No | Paso hasta el que ejecutar (0-5). Para depuración. | `5` |
-| `INTERVALO_REINTENTO_SEGUNDOS` | No | Segundos entre reintentos cuando no hay cita | `60` |
-| `DELAY_ENTRE_ACCIONES_SEGUNDOS` | No | Segundos entre cada acción del formulario | `1.0` |
+| `INTERVALO_REINTENTO_SEGUNDOS` | No | Segundos entre reintentos cuando no hay cita | `120` |
+| `DELAY_ACCION_BASE` | No | Segundos base entre cada acción del formulario | `2.0` |
+| `DELAY_ACCION_VARIANZA` | No | Fracción de varianza aleatoria sobre base | `0.8` |
 | `TIMEOUT_CARGA_PAGINA_SEGUNDOS` | No | Timeout de espera de carga de página | `15` |
 
 #### Modo depuración con `PASO_HASTA`
@@ -453,7 +475,7 @@ Los IDs de elementos HTML están externalizados. Si el portal cambia un ID, se e
 | Riesgo | Probabilidad | Mitigación |
 |---|---|---|
 | El portal cambia los IDs de los elementos | Media | IDs externalizados en config.json; corrección inmediata |
-| El portal detecta el patrón de navegación repetida (misma IP, mismo flujo) | Baja-media | Cadencia configurable entre acciones y entre reintentos; no hay fingerprint artificial |
+| El portal detecta el patrón de navegación repetida (misma IP, mismo flujo) | Media | Cadencia configurable, pausas entre pasos, detección automática de ban WAF con backoff de 5-15 min |
 | El portal añade CAPTCHA en algún paso | Baja | El bot se detiene y el usuario resuelve manualmente |
 | Brave cierra o pierde conexión | Baja | **Reconexión automática** con backoff exponencial |
 | La página tarda más de lo esperado en cargar | Media | Timeouts configurables por paso |
@@ -492,6 +514,16 @@ Los IDs de elementos HTML están externalizados. Si el portal cambia un ID, se e
 ### "La página no avanza después de seleccionar un valor"
 
 - Probablemente falta el dispatchEvent. Ver sección 8 de este documento.
+
+### "WAF DETECTADO" / "The requested URL was rejected"
+
+- El firewall del portal (WAF) ha baneado temporalmente tu IP por detectar patrones de automatización.
+- El bot detecta esta situación automáticamente y espera 5-15 minutos antes de reintentar.
+- Si ocurre frecuentemente, aumentar los delays en `.env`:
+  - `INTERVALO_REINTENTO_SEGUNDOS=180` (3 minutos entre reintentos)
+  - `DELAY_ACCION_BASE=3.0` (3 segundos base entre acciones)
+  - `DELAY_ACCION_VARIANZA=1.0` (varianza del 100%, rango [3.0, 6.0]s)
+- El ban WAF es temporal (generalmente 5-15 minutos). El bot se recupera solo.
 
 ### "El script lleva horas sin encontrar cita"
 
