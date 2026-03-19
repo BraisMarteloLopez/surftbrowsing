@@ -348,18 +348,110 @@ class SimuladorHumano:
 
     async def delay_activo(self, base: float = DELAY_ACCION_BASE,
                            varianza: float = DELAY_ACCION_VARIANZA) -> None:
-        """Espera humanizada. En Fase 3 añadirá movimiento de fondo."""
+        """Espera humanizada CON movimiento de ratón de fondo.
+
+        Lanza _movimiento_lectura como tarea concurrente que mueve el ratón
+        suavemente mientras el delay transcurre. La tarea se cancela
+        automáticamente cuando el delay termina.
+        """
         extra = base * random.uniform(0, varianza)
-        await asyncio.sleep(base + extra)
+        duracion = base + extra
+        tarea_raton = asyncio.create_task(self._movimiento_lectura(duracion))
+        try:
+            await asyncio.sleep(duracion)
+        finally:
+            tarea_raton.cancel()
+            try:
+                await tarea_raton
+            except asyncio.CancelledError:
+                pass
 
     async def pausa_lectura(self) -> None:
-        """Pausa entre pasos de formulario (simula lectura/pensamiento)."""
-        await asyncio.sleep(random.uniform(PAUSA_ENTRE_PASOS_MIN, PAUSA_ENTRE_PASOS_MAX))
+        """Pausa entre pasos de formulario con movimiento de fondo."""
+        duracion = random.uniform(PAUSA_ENTRE_PASOS_MIN, PAUSA_ENTRE_PASOS_MAX)
+        tarea_raton = asyncio.create_task(self._movimiento_lectura(duracion))
+        try:
+            await asyncio.sleep(duracion)
+        finally:
+            tarea_raton.cancel()
+            try:
+                await tarea_raton
+            except asyncio.CancelledError:
+                pass
 
     async def pausa_extra(self, probabilidad: float = 0.3) -> None:
-        """Con probabilidad dada, añade una pausa extra de 1-4s."""
+        """Con probabilidad dada, añade una pausa extra de 1-4s con movimiento."""
         if random.random() < probabilidad:
-            await asyncio.sleep(random.uniform(1.0, 4.0))
+            duracion = random.uniform(1.0, 4.0)
+            tarea_raton = asyncio.create_task(self._movimiento_lectura(duracion))
+            try:
+                await asyncio.sleep(duracion)
+            finally:
+                tarea_raton.cancel()
+                try:
+                    await tarea_raton
+                except asyncio.CancelledError:
+                    pass
+
+    # --- Movimiento de fondo durante pausas ---
+
+    async def _movimiento_lectura(self, duracion: float) -> None:
+        """Movimiento continuo que simula ojos + mano durante lectura.
+
+        Patrones posibles (se elige uno aleatoriamente):
+        1. Reposo activo: micro-movimientos en una zona reducida (±20px)
+        2. Lectura horizontal: zigzag lento izquierda-derecha, bajando poco a poco
+        3. Exploración: movimientos suaves entre zonas de interés de la página
+        4. Drift: movimiento muy lento en una dirección con correcciones
+        """
+        patron = random.choice(["reposo", "lectura", "exploracion", "drift"])
+        loop = asyncio.get_event_loop()
+        inicio = loop.time()
+
+        while loop.time() - inicio < duracion:
+            if patron == "reposo":
+                dx = random.randint(-20, 20)
+                dy = random.randint(-15, 15)
+                destino_x = max(0, self.mouse_x + dx)
+                destino_y = max(0, self.mouse_y + dy)
+                await self.mover_a(destino_x, destino_y, pasos=random.randint(2, 4))
+                await asyncio.sleep(random.uniform(0.5, 2.0))
+
+            elif patron == "lectura":
+                ancho = self.viewport[0]
+                x_inicio = int(ancho * 0.15)
+                x_fin = int(ancho * random.uniform(0.6, 0.85))
+                y_base = self.mouse_y
+                await self.mover_a(x_inicio, y_base, pasos=random.randint(3, 6))
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+                await self.mover_a(x_fin, y_base + random.randint(-5, 5),
+                                   pasos=random.randint(8, 15))
+                await asyncio.sleep(random.uniform(0.2, 0.6))
+                self.mouse_y += random.randint(15, 30)
+
+            elif patron == "exploracion":
+                x = random.randint(int(self.viewport[0] * 0.1),
+                                   int(self.viewport[0] * 0.9))
+                y = random.randint(int(self.viewport[1] * 0.1),
+                                   int(self.viewport[1] * 0.8))
+                await self.mover_a(x, y, pasos=random.randint(5, 10))
+                await asyncio.sleep(random.uniform(0.8, 2.5))
+
+            elif patron == "drift":
+                dx = random.uniform(-0.5, 0.5)
+                dy = random.uniform(-0.3, 0.3)
+                for _ in range(random.randint(5, 15)):
+                    self.mouse_x = max(0, int(self.mouse_x + dx * 10))
+                    self.mouse_y = max(0, int(self.mouse_y + dy * 10))
+                    try:
+                        await self.cdp.send("Input.dispatchMouseEvent", {
+                            "type": "mouseMoved",
+                            "x": self.mouse_x,
+                            "y": self.mouse_y,
+                        }, timeout=TIMEOUT_JS)
+                    except Exception:
+                        return
+                    await asyncio.sleep(random.uniform(0.1, 0.4))
 
 
 # ---------------------------------------------------------------------------
