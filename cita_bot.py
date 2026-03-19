@@ -412,8 +412,8 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
     3. Contenido mínimo en el body (página no vacía/error).
     4. URL coherente con el flujo del portal.
     """
-    # 1. Espera breve para asegurar render completo
-    await asyncio.sleep(1)
+    # 1. Espera aleatoria para simular lectura humana tras carga
+    await asyncio.sleep(random.uniform(1.0, 3.0))
 
     # 2. Verificar que la página tiene contenido sustancial
     body_length = await ejecutar_js(cdp, "document.body.innerText.length;")
