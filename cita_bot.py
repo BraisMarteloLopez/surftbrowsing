@@ -151,11 +151,17 @@ async def ejecutar_js(cdp: CDPSession, expression: str) -> dict:
     return result.get("result", {}).get("result", {})
 
 
+async def aplicar_zoom(cdp: CDPSession) -> None:
+    """Fija el zoom del navegador al 33% para que la página quepa en pantalla."""
+    await ejecutar_js(cdp, "document.body.style.zoom = '0.33';")
+
+
 async def navegar(cdp: CDPSession, url: str) -> None:
     """Navega a una URL y espera a que cargue."""
     await cdp.send("Page.enable")
     await cdp.send("Page.navigate", {"url": url})
     await cdp.wait_event("Page.loadEventFired", timeout=TIMEOUT_PAGINA)
+    await aplicar_zoom(cdp)
 
 
 async def esperar_carga(cdp: CDPSession) -> None:
@@ -164,6 +170,7 @@ async def esperar_carga(cdp: CDPSession) -> None:
         await cdp.wait_event("Page.loadEventFired", timeout=TIMEOUT_PAGINA)
     except asyncio.TimeoutError:
         log("Timeout esperando carga de página, continuando...")
+    await aplicar_zoom(cdp)
 
 
 async def delay() -> None:
