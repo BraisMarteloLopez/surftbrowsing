@@ -6,7 +6,7 @@ Antes de implementar, necesito que el usuario proporcione:
 
 ### Bloque A — Portal (inspección con F12)
 
-1. **URL de inicio** del portal ICP (la primera página que carga el formulario)
+1. **URL de inicio:** ✅ `https://icp.administracionelectronica.gob.es/icpplus/index.html`
 2. **IDs de elementos HTML** por formulario:
 
    **Formulario 1 (provincia):** ✅ COMPLETADO

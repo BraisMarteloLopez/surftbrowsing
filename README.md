@@ -1,7 +1,7 @@
 # Bot cita previa extranjería — POLICÍA TARJETA CONFLICTO UCRANIA (Madrid)
 
 **Fecha:** 18 de marzo de 2026
-**Estado:** IDs de elementos HTML completados — Pendiente: URL de inicio y datos personales
+**Estado:** Bloque A completado — Pendiente: datos personales (NIE + nombre)
 
 ---
 
@@ -147,7 +147,7 @@ El script se conecta al WebSocket de Brave en `localhost:9222`. Si Brave no est�
 El script navega automáticamente a la URL de inicio del portal ICP.
 Espera a que la página cargue completamente antes de continuar.
 
-> **PENDIENTE:** URL exacta de inicio del portal.
+> **URL:** `https://icp.administracionelectronica.gob.es/icpplus/index.html`
 
 ### PASO 3 — Formulario 1: Selección de provincia
 
@@ -336,7 +336,7 @@ El script debe manejar todos estos casos sin quedarse colgado. Si encuentra un e
 
 ```json
 {
-    "url_inicio": "PENDIENTE",
+    "url_inicio": "https://icp.administracionelectronica.gob.es/icpplus/index.html",
     "nie": "X1234567A",
     "nombre": "NOMBRE APELLIDO1 APELLIDO2",
     "intervalo_reintento_segundos": 60,
@@ -437,4 +437,4 @@ Elementos pendientes por formulario:
 - **Formulario 4:** ✅ input NIE `txtIdCitado`, input nombre `txtDesCitado`, botón `btnEnviar`
 - **Formulario 5:** ✅ botón `btnEnviar`
 - **Página sin citas:** ✅ botón `btnSalir`, texto "En este momento no hay citas disponibles."
-- **General:** PENDIENTE — URL de inicio
+- **General:** ✅ URL de inicio `https://icp.administracionelectronica.gob.es/icpplus/index.html`
