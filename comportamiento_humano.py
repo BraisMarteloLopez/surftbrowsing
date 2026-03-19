@@ -246,6 +246,123 @@ def intervalo_con_jitter(base: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Clase SimuladorHumano — estado encapsulado para formularios
+# ---------------------------------------------------------------------------
+
+class SimuladorHumano:
+    """Encapsula el estado del ratón y viewport para simular comportamiento humano.
+
+    Reemplaza el estado global en window.__mouse_pos por estado Python-side.
+    Los formularios reciben una instancia en vez de llamar funciones sueltas.
+    """
+
+    def __init__(self, cdp: CDPSession):
+        self.cdp = cdp
+        self.mouse_x: int = random.randint(100, 800)
+        self.mouse_y: int = random.randint(100, 400)
+        self.viewport: tuple[int, int] = (1024, 768)
+
+    async def actualizar_viewport(self) -> None:
+        """Lee dimensiones reales del viewport via CDP."""
+        result = await ejecutar_js(self.cdp, "[window.innerWidth, window.innerHeight];")
+        dims = result.get("value", [1024, 768])
+        if isinstance(dims, list) and len(dims) == 2:
+            self.viewport = (dims[0], dims[1])
+
+    async def mover_a(self, x_destino: int, y_destino: int,
+                      pasos: int | None = None) -> None:
+        """Trayectoria curva hacia destino. Actualiza self.mouse_x/y.
+
+        Usa smoothstep easing con desviaciones aleatorias para simular
+        movimiento humano. Estado del ratón se mantiene en Python.
+        """
+        if pasos is None:
+            pasos = random.randint(5, 12)
+
+        x_actual = self.mouse_x
+        y_actual = self.mouse_y
+
+        for i in range(pasos):
+            t = (i + 1) / pasos
+            ease = t * t * (3 - 2 * t)  # smoothstep
+
+            desviacion_x = random.randint(-15, 15) if i < pasos - 1 else 0
+            desviacion_y = random.randint(-10, 10) if i < pasos - 1 else 0
+
+            x = int(x_actual + (x_destino - x_actual) * ease + desviacion_x)
+            y = int(y_actual + (y_destino - y_actual) * ease + desviacion_y)
+
+            try:
+                await self.cdp.send("Input.dispatchMouseEvent", {
+                    "type": "mouseMoved",
+                    "x": max(0, x),
+                    "y": max(0, y),
+                }, timeout=TIMEOUT_JS)
+            except Exception:
+                break
+
+            pausa = random.uniform(0.01, 0.04)
+            if i < 2 or i > pasos - 3:
+                pausa *= 2
+            await asyncio.sleep(pausa)
+
+        self.mouse_x = x_destino
+        self.mouse_y = y_destino
+
+    async def mover_a_elemento(self, element_id: str) -> None:
+        """Obtiene posición del elemento y mueve el ratón hasta él."""
+        escaped = safe_js_string(element_id)
+        result = await ejecutar_js(self.cdp, f"""
+            (function() {{
+                var el = document.getElementById('{escaped}');
+                if (!el) return null;
+                var rect = el.getBoundingClientRect();
+                return {{
+                    x: Math.floor(rect.left + rect.width / 2 + (Math.random() * 10 - 5)),
+                    y: Math.floor(rect.top + rect.height / 2 + (Math.random() * 6 - 3))
+                }};
+            }})();
+        """)
+        pos = result.get("value")
+        if pos and isinstance(pos, dict) and "x" in pos and "y" in pos:
+            await self.mover_a(pos["x"], pos["y"])
+
+    async def movimiento_idle(self) -> None:
+        """1-3 movimientos aleatorios por el viewport (simula lectura)."""
+        await self.actualizar_viewport()
+        ancho, alto = self.viewport
+        movimientos = random.randint(1, 3)
+        for _ in range(movimientos):
+            x = random.randint(int(ancho * 0.1), int(ancho * 0.9))
+            y = random.randint(int(alto * 0.1), int(alto * 0.8))
+            await self.mover_a(x, y)
+            await asyncio.sleep(random.uniform(0.3, 1.0))
+
+    async def scroll(self) -> None:
+        """Scroll humanizado 2-4 pasos."""
+        pasos = random.randint(2, 4)
+        for _ in range(pasos):
+            distancia = random.randint(100, 300)
+            await ejecutar_js(self.cdp, f"window.scrollBy({{ top: {distancia}, behavior: 'smooth' }});")
+            await asyncio.sleep(random.uniform(DELAY_SCROLL_MIN, DELAY_SCROLL_MAX))
+
+    async def delay_activo(self, base: float = DELAY_ACCION_BASE,
+                           varianza: float = DELAY_ACCION_VARIANZA) -> None:
+        """Espera humanizada. En Fase 3 añadirá movimiento de fondo."""
+        extra = base * random.uniform(0, varianza)
+        await asyncio.sleep(base + extra)
+
+    async def pausa_lectura(self) -> None:
+        """Pausa entre pasos de formulario (simula lectura/pensamiento)."""
+        await asyncio.sleep(random.uniform(PAUSA_ENTRE_PASOS_MIN, PAUSA_ENTRE_PASOS_MAX))
+
+    async def pausa_extra(self, probabilidad: float = 0.3) -> None:
+        """Con probabilidad dada, añade una pausa extra de 1-4s."""
+        if random.random() < probabilidad:
+            await asyncio.sleep(random.uniform(1.0, 4.0))
+
+
+# ---------------------------------------------------------------------------
 # Detección WAF
 # ---------------------------------------------------------------------------
 

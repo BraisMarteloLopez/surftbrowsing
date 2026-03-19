@@ -1,7 +1,7 @@
 """Tests para funciones de navegación y formularios — Fase 8."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch, call
+from unittest.mock import AsyncMock, patch, call, MagicMock
 
 import pytest
 
@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cdp_helpers import CDPSession, ejecutar_js, safe_js_string
 from comportamiento_humano import (
-    WafBanError,
+    WafBanError, SimuladorHumano,
     mover_raton, movimiento_raton_aleatorio, mover_raton_a_elemento,
     scroll_humano, delay, pausa_entre_pasos, pausa_extra_aleatoria,
     intervalo_con_jitter, detectar_waf, limpiar_datos_navegador,
@@ -24,6 +24,14 @@ from cita_bot import (
     paso_formulario_4, paso_formulario_5,
     ciclo_completo, evaluar_estado_pagina,
 )
+
+
+@pytest.fixture
+def mock_humano():
+    """Crea un SimuladorHumano mock con todos los métodos async."""
+    humano = AsyncMock(spec=SimuladorHumano)
+    humano.cdp = AsyncMock(spec=CDPSession)
+    return humano
 
 
 @pytest.fixture
@@ -172,7 +180,7 @@ class TestClickSalir:
 
 class TestDelay:
     @pytest.mark.asyncio
-    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
     async def test_delay_uses_delay_accion(self, mock_sleep):
         await delay()
         mock_sleep.assert_called_once()
@@ -187,19 +195,12 @@ class TestPasoFormulario1:
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    @patch("cita_bot.delay", new_callable=AsyncMock)
-    @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
-    @patch("cita_bot.movimiento_raton_aleatorio", new_callable=AsyncMock)
-    @patch("cita_bot.mover_raton_a_elemento", new_callable=AsyncMock)
-    @patch("cita_bot.pausa_extra_aleatoria", new_callable=AsyncMock)
-    async def test_formulario_1_selecciona_provincia(self, mock_pausa, mock_mover_elem, mock_mov_alea,
-                                                      mock_scroll, mock_delay, mock_esperar, mock_ejs, mock_click, ids):
-        cdp = AsyncMock(spec=CDPSession)
-        await paso_formulario_1(cdp, ids)
+    async def test_formulario_1_selecciona_provincia(self, mock_esperar, mock_ejs, mock_click, mock_humano, ids):
+        await paso_formulario_1(mock_humano, ids)
 
-        mock_scroll.assert_called_once()
+        mock_humano.scroll.assert_called_once()
         mock_esperar.assert_called_once()
-        mock_mov_alea.assert_called_once()
+        mock_humano.movimiento_idle.assert_called_once()
         js_code = mock_ejs.call_args[0][1]
         assert "form" in js_code
         assert safe_js_string(ids["valor_madrid"]) in js_code
@@ -216,19 +217,12 @@ class TestPasoFormulario2:
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    @patch("cita_bot.delay", new_callable=AsyncMock)
-    @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
-    @patch("cita_bot.movimiento_raton_aleatorio", new_callable=AsyncMock)
-    @patch("cita_bot.mover_raton_a_elemento", new_callable=AsyncMock)
-    @patch("cita_bot.pausa_extra_aleatoria", new_callable=AsyncMock)
-    async def test_formulario_2_selecciona_tramite(self, mock_pausa, mock_mover_elem, mock_mov_alea,
-                                                    mock_scroll, mock_delay, mock_esperar, mock_ejs, mock_click, ids):
-        cdp = AsyncMock(spec=CDPSession)
-        await paso_formulario_2(cdp, ids)
+    async def test_formulario_2_selecciona_tramite(self, mock_esperar, mock_ejs, mock_click, mock_humano, ids):
+        await paso_formulario_2(mock_humano, ids)
 
-        mock_scroll.assert_called_once()
+        mock_humano.scroll.assert_called_once()
         mock_esperar.assert_called_once()
-        mock_mov_alea.assert_called_once()
+        mock_humano.movimiento_idle.assert_called_once()
         js_code = mock_ejs.call_args[0][1]
         assert safe_js_string(ids["dropdown_tramite"]) in js_code
         assert "4112" in js_code
@@ -242,19 +236,12 @@ class TestPasoFormulario3:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    @patch("cita_bot.delay", new_callable=AsyncMock)
-    @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
-    @patch("cita_bot.movimiento_raton_aleatorio", new_callable=AsyncMock)
-    @patch("cita_bot.mover_raton_a_elemento", new_callable=AsyncMock)
-    @patch("cita_bot.pausa_extra_aleatoria", new_callable=AsyncMock)
-    async def test_formulario_3_click_entrar(self, mock_pausa, mock_mover_elem, mock_mov_alea,
-                                              mock_scroll, mock_delay, mock_esperar, mock_click, ids):
-        cdp = AsyncMock(spec=CDPSession)
-        await paso_formulario_3(cdp, ids)
+    async def test_formulario_3_click_entrar(self, mock_esperar, mock_click, mock_humano, ids):
+        await paso_formulario_3(mock_humano, ids)
 
-        mock_scroll.assert_called_once()
+        mock_humano.scroll.assert_called_once()
         mock_esperar.assert_called_once()
-        mock_mov_alea.assert_called_once()
+        mock_humano.movimiento_idle.assert_called_once()
         click_js = mock_click.call_args[0][1]
         assert "btnEntrar" in click_js
 
@@ -290,21 +277,15 @@ class TestPasoFormulario4:
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    @patch("cita_bot.delay", new_callable=AsyncMock)
-    @patch("cita_bot.movimiento_raton_aleatorio", new_callable=AsyncMock)
-    @patch("cita_bot.mover_raton_a_elemento", new_callable=AsyncMock)
-    @patch("cita_bot.pausa_extra_aleatoria", new_callable=AsyncMock)
     @patch("cita_bot.random.random", return_value=0.3)
     @patch("cita_bot.NIE", "X1234567A")
     @patch("cita_bot.NOMBRE", "JUAN GARCÍA")
-    async def test_formulario_4_rellena_nie_primero(self, mock_rand, mock_pausa, mock_mover_elem, mock_mov_alea,
-                                                     mock_delay, mock_esperar, mock_ejs, mock_click, ids):
+    async def test_formulario_4_rellena_nie_primero(self, mock_rand, mock_esperar, mock_ejs, mock_click, mock_humano, ids):
         """random.random() < 0.5 → NIE primero, luego Nombre."""
-        cdp = AsyncMock(spec=CDPSession)
-        await paso_formulario_4(cdp, ids)
+        await paso_formulario_4(mock_humano, ids)
 
         mock_esperar.assert_called_once()
-        mock_mov_alea.assert_called_once()
+        mock_humano.movimiento_idle.assert_called_once()
         assert mock_ejs.call_count == 2
         nie_js = mock_ejs.call_args_list[0][0][1]
         nombre_js = mock_ejs.call_args_list[1][0][1]
@@ -317,18 +298,12 @@ class TestPasoFormulario4:
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    @patch("cita_bot.delay", new_callable=AsyncMock)
-    @patch("cita_bot.movimiento_raton_aleatorio", new_callable=AsyncMock)
-    @patch("cita_bot.mover_raton_a_elemento", new_callable=AsyncMock)
-    @patch("cita_bot.pausa_extra_aleatoria", new_callable=AsyncMock)
     @patch("cita_bot.random.random", return_value=0.7)
     @patch("cita_bot.NIE", "X1234567A")
     @patch("cita_bot.NOMBRE", "JUAN GARCÍA")
-    async def test_formulario_4_rellena_nombre_primero(self, mock_rand, mock_pausa, mock_mover_elem, mock_mov_alea,
-                                                        mock_delay, mock_esperar, mock_ejs, mock_click, ids):
+    async def test_formulario_4_rellena_nombre_primero(self, mock_rand, mock_esperar, mock_ejs, mock_click, mock_humano, ids):
         """random.random() >= 0.5 → Nombre primero, luego NIE."""
-        cdp = AsyncMock(spec=CDPSession)
-        await paso_formulario_4(cdp, ids)
+        await paso_formulario_4(mock_humano, ids)
 
         mock_esperar.assert_called_once()
         assert mock_ejs.call_count == 2
@@ -344,30 +319,22 @@ class TestPasoFormulario4:
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    @patch("cita_bot.delay", new_callable=AsyncMock)
-    @patch("cita_bot.movimiento_raton_aleatorio", new_callable=AsyncMock)
-    @patch("cita_bot.mover_raton_a_elemento", new_callable=AsyncMock)
-    @patch("cita_bot.pausa_extra_aleatoria", new_callable=AsyncMock)
     @patch("cita_bot.random.random", return_value=0.3)
     @patch("cita_bot.NIE", "X1234567A")
     @patch("cita_bot.NOMBRE", "O'BRIEN TEST")
-    async def test_formulario_4_escapa_nombre_con_comilla(self, mock_rand, mock_pausa, mock_mover_elem, mock_mov_alea,
-                                                           mock_delay, mock_esperar, mock_ejs, mock_click, ids):
-        cdp = AsyncMock(spec=CDPSession)
-        await paso_formulario_4(cdp, ids)
+    async def test_formulario_4_escapa_nombre_con_comilla(self, mock_rand, mock_esperar, mock_ejs, mock_click, mock_humano, ids):
+        await paso_formulario_4(mock_humano, ids)
 
         nombre_js = mock_ejs.call_args_list[1][0][1]
         assert "O\\'BRIEN TEST" in nombre_js
 
     @pytest.mark.asyncio
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=False)
-    @patch("cita_bot.delay", new_callable=AsyncMock)
     @patch("cita_bot.NIE", "X1234567A")
     @patch("cita_bot.NOMBRE", "TEST")
-    async def test_formulario_4_falla_si_elemento_no_aparece(self, mock_delay, mock_esperar, ids):
-        cdp = AsyncMock(spec=CDPSession)
+    async def test_formulario_4_falla_si_elemento_no_aparece(self, mock_esperar, mock_humano, ids):
         with pytest.raises(RuntimeError, match="no apareció"):
-            await paso_formulario_4(cdp, ids)
+            await paso_formulario_4(mock_humano, ids)
 
 
 # ---------------------------------------------------------------------------
@@ -378,18 +345,12 @@ class TestPasoFormulario5:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    @patch("cita_bot.delay", new_callable=AsyncMock)
-    @patch("cita_bot.movimiento_raton_aleatorio", new_callable=AsyncMock)
-    @patch("cita_bot.mover_raton_a_elemento", new_callable=AsyncMock)
-    @patch("cita_bot.pausa_extra_aleatoria", new_callable=AsyncMock)
-    async def test_formulario_5_solicita_cita(self, mock_pausa, mock_mover_elem, mock_mov_alea,
-                                               mock_delay, mock_esperar, mock_click, ids):
-        cdp = AsyncMock(spec=CDPSession)
-        await paso_formulario_5(cdp, ids)
+    async def test_formulario_5_solicita_cita(self, mock_esperar, mock_click, mock_humano, ids):
+        await paso_formulario_5(mock_humano, ids)
 
         mock_esperar.assert_called_once()
-        mock_mov_alea.assert_called_once()
-        mock_mover_elem.assert_called_once()
+        mock_humano.movimiento_idle.assert_called_once()
+        mock_humano.mover_a_elemento.assert_called_once()
         click_js = mock_click.call_args[0][1]
         assert "btnEnviar" in click_js
 
@@ -419,6 +380,10 @@ class TestCicloCompleto:
         f4.assert_called_once()
         f5.assert_called_once()
         mock_eval.assert_called_once()
+        # Form steps receive SimuladorHumano instance, not raw cdp
+        humano_arg = f1.call_args[0][0]
+        assert isinstance(humano_arg, SimuladorHumano)
+        assert humano_arg.cdp is cdp
 
     @pytest.mark.asyncio
     @patch("cita_bot.paso_formulario_3", new_callable=AsyncMock)
