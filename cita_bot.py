@@ -298,7 +298,10 @@ async def verificar_url(cdp: CDPSession, url_esperada: str) -> bool:
 
 
 async def esperar_elemento(cdp: CDPSession, element_id: str, timeout: float = 10.0) -> bool:
-    """Espera hasta que un elemento exista en el DOM (polling cada 0.5s)."""
+    """Espera hasta que un elemento exista en el DOM (polling cada 0.5s).
+
+    Recibe el ID crudo (sin escapar). El escape se aplica internamente.
+    """
     escaped = safe_js_string(element_id)
     inicio = asyncio.get_event_loop().time()
     while (asyncio.get_event_loop().time() - inicio) < timeout:

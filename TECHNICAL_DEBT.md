@@ -21,7 +21,7 @@
 | TD-10 | Sin tests automatizados | Media (Calidad) | N/A | **Resuelto** |
 | TD-11 | Alerta sonora inútil en Linux/Mac | Baja | Alta en Linux | Descartada |
 | TD-12 | Timeout uniforme para todas las operaciones CDP | Baja-Media | Baja | **Resuelto** |
-| TD-13 | `esperar_elemento` escapa IDs redundantemente | Baja-Media | Baja | Pendiente |
+| TD-13 | `esperar_elemento` escapa IDs redundantemente | Baja-Media | Baja | **Resuelto** |
 | TD-14 | `click_salir` lanza RuntimeError en vez de tolerar fallos | Media | Media | Pendiente |
 | TD-15 | `scroll_humano` se ejecuta antes de verificar que la página cargó | Media | Media-Alta | Pendiente |
 | TD-16 | `asyncio.get_event_loop()` deprecado en `esperar_elemento` | Baja | Baja | Pendiente |
