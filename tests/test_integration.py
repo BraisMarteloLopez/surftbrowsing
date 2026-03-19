@@ -168,7 +168,7 @@ class TestDeteccionYBackoff:
     async def test_desconocido_incrementa_backoff(self, mock_sleep, mock_ejs):
         """Estado DESCONOCIDO debería integrarse con backoff."""
         cdp = AsyncMock(spec=CDPSession)
-        ids = {"boton_salir_nocita": "btnSalir"}
+        ids = {"texto_no_hay_citas": "En este momento no hay citas disponibles."}
 
         # Simular página vacía → DESCONOCIDO
         mock_ejs.return_value = {"value": 10}  # body length < 50

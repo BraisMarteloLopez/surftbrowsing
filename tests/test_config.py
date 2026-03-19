@@ -26,7 +26,6 @@ REQUIRED_IDS = [
     "input_nombre",
     "boton_aceptar_f4",
     "boton_solicitar_cita",
-    "boton_salir_nocita",
     "texto_no_hay_citas",
 ]
 

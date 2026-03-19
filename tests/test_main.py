@@ -85,7 +85,7 @@ class TestMainValidation:
     @patch("cita_bot.navegar", new_callable=AsyncMock)
     @patch("cita_bot.verificar_url", new_callable=AsyncMock, return_value=True)
     @patch("cita_bot.ciclo_completo", new_callable=AsyncMock)
-    @patch("cita_bot.click_salir", new_callable=AsyncMock)
+    @patch("cita_bot.click_aceptar_nocita", new_callable=AsyncMock)
     @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
     async def test_main_no_hay_citas_reintenta(self, mock_sleep, mock_salir,
                                                 mock_ciclo, mock_verify,
@@ -298,7 +298,7 @@ class TestMainValidation:
     @patch("cita_bot.navegar", new_callable=AsyncMock)
     @patch("cita_bot.verificar_url", new_callable=AsyncMock, return_value=True)
     @patch("cita_bot.ciclo_completo", new_callable=AsyncMock)
-    @patch("cita_bot.click_salir", new_callable=AsyncMock)
+    @patch("cita_bot.click_aceptar_nocita", new_callable=AsyncMock)
     @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
     async def test_main_click_salir_falla_sigue_sin_navegar(self, mock_sleep, mock_salir,
                                                             mock_ciclo, mock_verify,

@@ -102,6 +102,5 @@ def sample_ids():
         "input_nombre": "txtDesCitado",
         "boton_aceptar_f4": "btnEnviar",
         "boton_solicitar_cita": "btnEnviar",
-        "boton_salir_nocita": "btnSalir",
         "texto_no_hay_citas": "En este momento no hay citas disponibles.",
     }

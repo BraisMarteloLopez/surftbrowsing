@@ -32,7 +32,6 @@ def _make_ejecutar_js_mock(responses: list[dict]):
 @pytest.fixture
 def sample_ids():
     return {
-        "boton_salir_nocita": "btnSalir",
         "texto_no_hay_citas": "En este momento no hay citas disponibles.",
     }
 
@@ -112,8 +111,8 @@ async def test_url_inesperada_es_desconocido(mock_sleep, mock_ejs, sample_ids):
 @pytest.mark.asyncio
 @patch("cita_bot.ejecutar_js")
 @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-async def test_sin_boton_salir_sigue_siendo_no_hay_citas(mock_sleep, mock_ejs, sample_ids):
-    """Texto 'no hay citas' sin botón Salir → NO_HAY_CITAS (el texto es la señal definitiva)."""
+async def test_sin_boton_aceptar_sigue_siendo_no_hay_citas(mock_sleep, mock_ejs, sample_ids):
+    """Texto 'no hay citas' sin botón Aceptar → NO_HAY_CITAS (el texto es la señal definitiva)."""
     cdp = AsyncMock(spec=CDPSession)
     mock_ejs.side_effect = _make_ejecutar_js_mock([
         {"value": 200},                # body length
@@ -158,7 +157,6 @@ async def test_icpplustiem_url_is_valid(mock_sleep, mock_ejs, sample_ids):
 @pytest.fixture
 def ids_con_texto_positivo():
     return {
-        "boton_salir_nocita": "btnSalir",
         "texto_no_hay_citas": "En este momento no hay citas disponibles.",
         "texto_hay_citas": "Seleccione una fecha",
     }
@@ -202,7 +200,6 @@ async def test_texto_positivo_no_encontrado_es_desconocido(mock_sleep, mock_ejs,
 async def test_texto_positivo_vacio_no_afecta(mock_sleep, mock_ejs):
     """texto_hay_citas vacío → se ignora, comportamiento original."""
     ids_vacio = {
-        "boton_salir_nocita": "btnSalir",
         "texto_no_hay_citas": "En este momento no hay citas disponibles.",
         "texto_hay_citas": "",
     }
