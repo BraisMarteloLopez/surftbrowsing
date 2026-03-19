@@ -32,8 +32,20 @@ NIE = os.getenv("NIE", "").strip()
 NOMBRE = os.getenv("NOMBRE", "").strip()
 PASO_HASTA = int(os.getenv("PASO_HASTA", "5"))
 INTERVALO_REINTENTO = float(os.getenv("INTERVALO_REINTENTO_SEGUNDOS", "60"))
-DELAY_ACCION = float(os.getenv("DELAY_ENTRE_ACCIONES_SEGUNDOS", "1.0"))
 TIMEOUT_PAGINA = float(os.getenv("TIMEOUT_CARGA_PAGINA_SEGUNDOS", "15"))
+
+# Delays configurables: cada uno con base y varianza (±%)
+# Acciones de formulario (click, select, etc.)
+DELAY_ACCION_BASE = float(os.getenv("DELAY_ACCION_BASE", "1.0"))
+DELAY_ACCION_VARIANZA = float(os.getenv("DELAY_ACCION_VARIANZA", "0.5"))
+
+# Scroll humano entre pasos de scroll
+DELAY_SCROLL_MIN = float(os.getenv("DELAY_SCROLL_MIN", "0.4"))
+DELAY_SCROLL_MAX = float(os.getenv("DELAY_SCROLL_MAX", "1.2"))
+
+# Lectura de página antes de evaluar resultado
+DELAY_EVALUACION_MIN = float(os.getenv("DELAY_EVALUACION_MIN", "1.0"))
+DELAY_EVALUACION_MAX = float(os.getenv("DELAY_EVALUACION_MAX", "3.0"))
 
 CDP_PORT = 9222
 CDP_URL = f"http://localhost:{CDP_PORT}/json"
@@ -261,7 +273,7 @@ async def scroll_humano(cdp: CDPSession, pasos: int = 3) -> None:
     for _ in range(pasos):
         distancia = random.randint(100, 300)
         await ejecutar_js(cdp, f"window.scrollBy({{ top: {distancia}, behavior: 'smooth' }});")
-        await asyncio.sleep(random.uniform(0.4, 1.2))
+        await asyncio.sleep(random.uniform(DELAY_SCROLL_MIN, DELAY_SCROLL_MAX))
 
 
 async def navegar(cdp: CDPSession, url: str) -> None:
@@ -297,11 +309,9 @@ async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
 
 async def delay() -> None:
     """Pausa aleatoria entre acciones para simular comportamiento humano."""
-    # ±50% del valor configurado: si DELAY_ACCION=5, rango [2.5, 7.5]
-    minimo = DELAY_ACCION * 0.5
-    maximo = DELAY_ACCION * 1.5
-    espera = random.uniform(minimo, maximo)
-    await asyncio.sleep(espera)
+    minimo = DELAY_ACCION_BASE * (1 - DELAY_ACCION_VARIANZA)
+    maximo = DELAY_ACCION_BASE * (1 + DELAY_ACCION_VARIANZA)
+    await asyncio.sleep(random.uniform(minimo, maximo))
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +423,7 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
     4. URL coherente con el flujo del portal.
     """
     # 1. Espera aleatoria para simular lectura humana tras carga
-    await asyncio.sleep(random.uniform(1.0, 3.0))
+    await asyncio.sleep(random.uniform(DELAY_EVALUACION_MIN, DELAY_EVALUACION_MAX))
 
     # 2. Verificar que la página tiene contenido sustancial
     body_length = await ejecutar_js(cdp, "document.body.innerText.length;")
@@ -553,7 +563,7 @@ async def main() -> None:
         sys.exit(1)
 
     log_info(f"Configuración cargada — NIE: {NIE[:3]}*** / Nombre: {NOMBRE.split()[0]}***")
-    log_info(f"Intervalo reintento: {INTERVALO_REINTENTO}s / Delay acciones: {DELAY_ACCION}s / Timeout: {TIMEOUT_PAGINA}s")
+    log_info(f"Intervalo reintento: {INTERVALO_REINTENTO}s / Delay acciones: {DELAY_ACCION_BASE}s±{DELAY_ACCION_VARIANZA*100:.0f}% / Timeout: {TIMEOUT_PAGINA}s")
     if PASO_HASTA < 5:
         log_info(f"Modo depuración: ejecutando pasos 0-{PASO_HASTA} y deteniendo (no entra en bucle)")
 
