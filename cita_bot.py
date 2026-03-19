@@ -287,6 +287,151 @@ async def ejecutar_js(cdp: CDPSession, expression: str,
     return result.get("result", {}).get("result", {})
 
 
+# ---------------------------------------------------------------------------
+# PLAN: Detección de eventos focus/blur en formularios
+# ---------------------------------------------------------------------------
+# Muchos portales web (incluido ICP) pueden tener listeners de focus/blur
+# en campos de formulario para tracking de comportamiento del usuario.
+# Un bot que solo hace .value = "X" nunca dispara estos eventos, lo cual
+# es detectable.
+#
+# Implementación futura en 3 fases:
+#
+# Fase 1 — Auditoría de event listeners (sin cambios funcionales):
+#   - Antes de interactuar con un campo, ejecutar JS para listar sus listeners:
+#       getEventListeners(document.getElementById('campo'))
+#     Nota: getEventListeners solo está disponible en consola de DevTools,
+#     no en Runtime.evaluate. Alternativa viable:
+#       cdp.send("DOMDebugger.getEventListeners", {"objectId": ...})
+#   - Logear qué campos tienen focus, blur, input, change, keydown, keyup.
+#   - Esto permite entender qué eventos espera el portal sin cambiar nada.
+#
+# Fase 2 — Simulación de focus/blur para campos con listeners:
+#   - Para cada campo que tenga listeners de focus:
+#       1. mover_raton_a_elemento(cdp, campo_id)
+#       2. cdp.send("Input.dispatchMouseEvent", type="mousePressed", ...)
+#       3. El click activa focus de forma natural.
+#       4. Pausa de lectura/escritura (delay humanizado).
+#       5. Rellenar campo con Input.dispatchKeyEvent (char a char).
+#       6. Tab o click en siguiente campo → dispara blur del anterior.
+#   - Para campos SIN listeners de focus: mantener el enfoque actual
+#     (.value = ... + dispatchEvent) que es más rápido y suficiente.
+#
+# Fase 3 — Simulación de Tab entre campos:
+#   - Detectar el tabindex natural del formulario.
+#   - En lugar de click directo, usar Input.dispatchKeyEvent con key="Tab"
+#     para navegar entre campos como haría un usuario con teclado.
+#   - Alternar aleatoriamente entre Tab y click para variar el patrón.
+#   - Incluir shift+Tab ocasional (corregir → volver atrás).
+#
+# Prioridad: Fase 1 es de bajo riesgo y alta información. Implementar
+# primero para tomar decisiones informadas sobre Fases 2 y 3.
+# ---------------------------------------------------------------------------
+
+
+async def mover_raton(cdp: CDPSession, x_destino: int, y_destino: int,
+                      pasos: int | None = None) -> None:
+    """Mueve el ratón desde su posición actual hasta (x_destino, y_destino).
+
+    Simula una trayectoria humana con múltiples puntos intermedios,
+    velocidad variable (más rápido en el medio, más lento al inicio/final),
+    y pequeñas desviaciones aleatorias del camino recto.
+
+    Solo genera eventos mouseMoved — nunca hace click.
+    """
+    if pasos is None:
+        pasos = random.randint(5, 12)
+
+    # Obtener posición actual del ratón (o empezar desde un punto aleatorio)
+    result = await ejecutar_js(cdp, """
+        (function() {
+            var pos = window.__mouse_pos || {x: Math.floor(Math.random() * 800) + 100, y: Math.floor(Math.random() * 400) + 100};
+            return pos;
+        })();
+    """)
+    pos = result.get("value", {})
+    x_actual = pos.get("x", random.randint(100, 800))
+    y_actual = pos.get("y", random.randint(100, 400))
+
+    for i in range(pasos):
+        # Progreso no lineal: ease-in-out (más lento al inicio/final)
+        t = (i + 1) / pasos
+        ease = t * t * (3 - 2 * t)  # smoothstep
+
+        # Punto intermedio con desviación aleatoria del camino recto
+        desviacion_x = random.randint(-15, 15) if i < pasos - 1 else 0
+        desviacion_y = random.randint(-10, 10) if i < pasos - 1 else 0
+
+        x = int(x_actual + (x_destino - x_actual) * ease + desviacion_x)
+        y = int(y_actual + (y_destino - y_actual) * ease + desviacion_y)
+
+        try:
+            await cdp.send("Input.dispatchMouseEvent", {
+                "type": "mouseMoved",
+                "x": max(0, x),
+                "y": max(0, y),
+            }, timeout=TIMEOUT_JS)
+        except Exception:
+            return  # Si falla, no es crítico
+
+        # Pausa variable entre movimientos (más corta en el medio de la trayectoria)
+        pausa = random.uniform(0.01, 0.04)
+        if i < 2 or i > pasos - 3:
+            pausa *= 2  # Más lento al inicio/final
+        await asyncio.sleep(pausa)
+
+    # Guardar posición final para la siguiente llamada
+    await ejecutar_js(cdp, f"window.__mouse_pos = {{x: {x_destino}, y: {y_destino}}};")
+
+
+async def movimiento_raton_aleatorio(cdp: CDPSession) -> None:
+    """Realiza 1-3 movimientos de ratón aleatorios por la página visible.
+
+    Simula a un humano que mueve el ratón mientras lee/piensa.
+    Los destinos son puntos aleatorios dentro del viewport.
+    """
+    movimientos = random.randint(1, 3)
+    for _ in range(movimientos):
+        # Obtener dimensiones del viewport
+        result = await ejecutar_js(cdp, "[window.innerWidth, window.innerHeight];")
+        dims = result.get("value", [1024, 768])
+        if isinstance(dims, list) and len(dims) == 2:
+            ancho, alto = dims
+        else:
+            ancho, alto = 1024, 768
+
+        # Destino aleatorio con margen del viewport
+        x = random.randint(int(ancho * 0.1), int(ancho * 0.9))
+        y = random.randint(int(alto * 0.1), int(alto * 0.8))
+
+        await mover_raton(cdp, x, y)
+        # Pausa de "lectura" entre movimientos
+        await asyncio.sleep(random.uniform(0.3, 1.0))
+
+
+async def mover_raton_a_elemento(cdp: CDPSession, element_id: str) -> None:
+    """Mueve el ratón hacia la posición de un elemento del DOM.
+
+    Obtiene las coordenadas del centro del elemento via getBoundingClientRect
+    y mueve el ratón hasta ahí con trayectoria humana.
+    """
+    escaped = safe_js_string(element_id)
+    result = await ejecutar_js(cdp, f"""
+        (function() {{
+            var el = document.getElementById('{escaped}');
+            if (!el) return null;
+            var rect = el.getBoundingClientRect();
+            return {{
+                x: Math.floor(rect.left + rect.width / 2 + (Math.random() * 10 - 5)),
+                y: Math.floor(rect.top + rect.height / 2 + (Math.random() * 6 - 3))
+            }};
+        }})();
+    """)
+    pos = result.get("value")
+    if pos and isinstance(pos, dict) and "x" in pos and "y" in pos:
+        await mover_raton(cdp, pos["x"], pos["y"])
+
+
 async def scroll_humano(cdp: CDPSession) -> None:
     """Simula scroll humano hacia abajo: 2-4 pasos con distancia y delay aleatorios."""
     pasos = random.randint(2, 4)
@@ -429,6 +574,15 @@ async def pausa_entre_pasos() -> None:
 # Navegación de formularios
 # ---------------------------------------------------------------------------
 
+async def pausa_extra_aleatoria() -> None:
+    """Con un 30% de probabilidad, añade una pausa extra de 1-4s.
+
+    Simula momentos en los que un humano se distrae, relee, o duda.
+    """
+    if random.random() < 0.3:
+        await asyncio.sleep(random.uniform(1.0, 4.0))
+
+
 async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
     """Formulario 1: Selección de provincia (Madrid)."""
     log("Formulario 1: seleccionando provincia Madrid")
@@ -440,15 +594,21 @@ async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["dropdown_provincia"]):
         raise RuntimeError(f"Elemento #{ids['dropdown_provincia']} no apareció tras carga de página")
 
+    await movimiento_raton_aleatorio(cdp)
     await scroll_humano(cdp)
     await delay()
+    await pausa_extra_aleatoria()
 
+    # Mover ratón al dropdown antes de interactuar
+    await mover_raton_a_elemento(cdp, ids["dropdown_provincia"])
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
         document.getElementById('{dropdown_id}').dispatchEvent(new Event('change', {{ bubbles: true }}));
     """)
 
     await delay()
+    await mover_raton_a_elemento(cdp, ids["boton_aceptar_f1"])
+    await pausa_extra_aleatoria()
     log("Formulario 1: provincia seleccionada, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -464,15 +624,19 @@ async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["dropdown_tramite"]):
         raise RuntimeError(f"Elemento #{ids['dropdown_tramite']} no apareció tras carga de página")
 
+    await movimiento_raton_aleatorio(cdp)
     await scroll_humano(cdp)
     await delay()
 
+    await mover_raton_a_elemento(cdp, ids["dropdown_tramite"])
+    await pausa_extra_aleatoria()
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
         document.getElementById('{dropdown_id}').dispatchEvent(new Event('change', {{ bubbles: true }}));
     """)
 
     await delay()
+    await mover_raton_a_elemento(cdp, ids["boton_aceptar_f2"])
     log("Formulario 2: trámite seleccionado, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -486,15 +650,41 @@ async def paso_formulario_3(cdp: CDPSession, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["boton_entrar_f3"]):
         raise RuntimeError(f"Elemento #{ids['boton_entrar_f3']} no apareció tras carga de página")
 
+    await movimiento_raton_aleatorio(cdp)
     await scroll_humano(cdp)
     await delay()
+    await pausa_extra_aleatoria()
 
+    await mover_raton_a_elemento(cdp, ids["boton_entrar_f3"])
     log("Formulario 3: aviso aceptado, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
 
+async def _rellenar_campo_nie(cdp: CDPSession, input_nie: str) -> None:
+    """Rellena el campo NIE con movimiento de ratón y focus previo."""
+    nie_escaped = safe_js_string(NIE)
+    await ejecutar_js(cdp, f"""
+        document.getElementById('{input_nie}').value = '{nie_escaped}';
+        document.getElementById('{input_nie}').dispatchEvent(new Event('input', {{ bubbles: true }}));
+    """)
+
+
+async def _rellenar_campo_nombre(cdp: CDPSession, input_nombre: str) -> None:
+    """Rellena el campo nombre con movimiento de ratón y focus previo."""
+    nombre_escaped = safe_js_string(NOMBRE)
+    await ejecutar_js(cdp, f"""
+        document.getElementById('{input_nombre}').value = '{nombre_escaped}';
+        document.getElementById('{input_nombre}').dispatchEvent(new Event('change', {{ bubbles: true }}));
+    """)
+
+
 async def paso_formulario_4(cdp: CDPSession, ids: dict) -> None:
-    """Formulario 4: Datos personales (NIE + nombre)."""
+    """Formulario 4: Datos personales (NIE + nombre).
+
+    El orden de rellenado de campos se aleatoriza: a veces NIE primero,
+    a veces nombre primero. Un humano no siempre rellena los campos
+    en el mismo orden.
+    """
     log("Formulario 4: rellenando datos personales")
     await delay()
 
@@ -506,23 +696,29 @@ async def paso_formulario_4(cdp: CDPSession, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["input_nie"]):
         raise RuntimeError(f"Elemento #{ids['input_nie']} no apareció tras carga de página")
 
-    # NIE
-    nie_escaped = safe_js_string(NIE)
-    await ejecutar_js(cdp, f"""
-        document.getElementById('{input_nie}').value = '{nie_escaped}';
-        document.getElementById('{input_nie}').dispatchEvent(new Event('input', {{ bubbles: true }}));
-    """)
+    await movimiento_raton_aleatorio(cdp)
+    await pausa_extra_aleatoria()
+
+    # Orden aleatorio: a veces NIE primero, a veces nombre primero
+    if random.random() < 0.5:
+        # NIE → Nombre (orden original)
+        await mover_raton_a_elemento(cdp, ids["input_nie"])
+        await _rellenar_campo_nie(cdp, input_nie)
+        await delay()
+        await mover_raton_a_elemento(cdp, ids["input_nombre"])
+        await pausa_extra_aleatoria()
+        await _rellenar_campo_nombre(cdp, input_nombre)
+    else:
+        # Nombre → NIE (orden invertido)
+        await mover_raton_a_elemento(cdp, ids["input_nombre"])
+        await _rellenar_campo_nombre(cdp, input_nombre)
+        await delay()
+        await mover_raton_a_elemento(cdp, ids["input_nie"])
+        await pausa_extra_aleatoria()
+        await _rellenar_campo_nie(cdp, input_nie)
 
     await delay()
-
-    # Nombre
-    nombre_escaped = safe_js_string(NOMBRE)
-    await ejecutar_js(cdp, f"""
-        document.getElementById('{input_nombre}').value = '{nombre_escaped}';
-        document.getElementById('{input_nombre}').dispatchEvent(new Event('change', {{ bubbles: true }}));
-    """)
-
-    await delay()
+    await mover_raton_a_elemento(cdp, ids["boton_aceptar_f4"])
     log("Formulario 4: datos enviados, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -536,6 +732,10 @@ async def paso_formulario_5(cdp: CDPSession, ids: dict) -> None:
 
     if not await esperar_elemento(cdp, ids["boton_solicitar_cita"]):
         raise RuntimeError(f"Elemento #{ids['boton_solicitar_cita']} no apareció tras carga de página")
+
+    await movimiento_raton_aleatorio(cdp)
+    await pausa_extra_aleatoria()
+    await mover_raton_a_elemento(cdp, ids["boton_solicitar_cita"])
 
     log("Formulario 5: cita solicitada, esperando respuesta...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
@@ -822,10 +1022,10 @@ async def main() -> None:
                 backoff.registrar_exito()
                 waf_backoff.registrar_exito()
                 log("Resultado: NO HAY CITAS")
-                await click_salir(cdp, ids)
+                if await click_salir(cdp, ids):
+                    skip_navegacion = True
                 # Limpiar caché y storage antes del siguiente ciclo
                 await limpiar_datos_navegador(cdp, url_inicio)
-                skip_navegacion = False
                 espera = intervalo_con_jitter(INTERVALO_REINTENTO)
                 log(f"Reintentando en {espera:.0f}s...")
                 await asyncio.sleep(espera)
