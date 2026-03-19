@@ -94,6 +94,16 @@ Cerrar todas las ventanas de Brave antes de ejecutar este comando. Si Brave ya e
 
 Sustituir la ruta por la correcta de tu instalación.
 
+> **Si aparece el error "La conexión no es privada" (`NET::ERR_CERT_AUTHORITY_INVALID`):**
+>
+> El portal ICP puede presentar problemas de certificado SSL. Si Brave bloquea el acceso (especialmente con HSTS, donde no aparece la opción "Avanzado → Continuar"), relanzar Brave con el flag adicional `--ignore-certificate-errors`:
+>
+> ```
+> "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" --remote-debugging-port=9222 --ignore-certificate-errors
+> ```
+>
+> Este flag desactiva la validación de certificados SSL. Usarlo **solo** mientras se ejecuta el bot, y no para navegación general.
+
 ### 5.3. Verificar que CDP funciona
 
 Antes de ejecutar el script, abrir en el propio Brave (o cualquier navegador):
@@ -456,6 +466,7 @@ Los IDs de elementos HTML están externalizados. Si el portal cambia un ID, se e
 | El portal añade CAPTCHA en algún paso | Baja | El bot se detiene y el usuario resuelve manualmente |
 | Brave cierra o pierde conexión | Baja | **Reconexión automática** con backoff exponencial |
 | La página tarda más de lo esperado en cargar | Media | Timeouts configurables por paso |
+| Error de certificado SSL del portal | Baja | Relanzar Brave con `--ignore-certificate-errors` (ver sección 5.2) |
 
 ---
 
@@ -476,6 +487,12 @@ Los IDs de elementos HTML están externalizados. Si el portal cambia un ID, se e
 - Brave no se lanzó con `--remote-debugging-port=9222`
 - Brave ya estaba corriendo antes de ejecutar el comando con el flag. Cerrar todas las ventanas de Brave y volver a lanzar con el flag.
 - Otro programa está usando el puerto 9222. Cambiar a otro puerto (ej: 9223) tanto en el comando de Brave como en el script.
+
+### "La conexión no es privada" / `NET::ERR_CERT_AUTHORITY_INVALID`
+
+- El portal ICP tiene un problema de certificado SSL. Brave bloquea el acceso.
+- Si aparece la opción "Avanzado → Continuar": hacer click para aceptar y relanzar el bot.
+- Si NO aparece (HSTS activo): cerrar Brave y relanzarlo con `--ignore-certificate-errors` (ver sección 5.2).
 
 ### "Elemento no encontrado: ID_xxx"
 
