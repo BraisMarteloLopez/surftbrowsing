@@ -67,6 +67,46 @@ class EstadoPagina(Enum):
     DESCONOCIDO = "desconocido"
 
 
+class BackoffController:
+    """Controla intervalos de reintento con backoff exponencial y alertas."""
+
+    def __init__(self, intervalo_base: float = 5.0, max_intervalo: float = 300.0,
+                 umbral_alerta: int = 10):
+        self.intervalo_base = intervalo_base
+        self.max_intervalo = max_intervalo
+        self.umbral_alerta = umbral_alerta
+        self._errores_consecutivos = 0
+        self._tipo_ultimo_error: str | None = None
+
+    def registrar_exito(self) -> None:
+        """Resetea contadores tras un ciclo exitoso (sin errores)."""
+        self._errores_consecutivos = 0
+        self._tipo_ultimo_error = None
+
+    def registrar_error(self, tipo: str) -> float:
+        """Registra un error y devuelve el intervalo de espera recomendado."""
+        self._errores_consecutivos += 1
+        self._tipo_ultimo_error = tipo
+        intervalo = min(
+            self.intervalo_base * (2 ** (self._errores_consecutivos - 1)),
+            self.max_intervalo,
+        )
+        return intervalo
+
+    @property
+    def errores_consecutivos(self) -> int:
+        return self._errores_consecutivos
+
+    @property
+    def debe_alertar(self) -> bool:
+        """True si los errores consecutivos superan el umbral."""
+        return self._errores_consecutivos >= self.umbral_alerta
+
+    @property
+    def tipo_ultimo_error(self) -> str | None:
+        return self._tipo_ultimo_error
+
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -223,12 +263,20 @@ async def aplicar_zoom(cdp: CDPSession) -> None:
 
 async def navegar(cdp: CDPSession, url: str) -> None:
     """Navega a una URL y espera a que cargue."""
-    await cdp.send("Page.enable")
+    await cdp.send("Page.enable", timeout=TIMEOUT_JS)
     # Pre-registrar el Future ANTES de navegar para evitar race condition
     load_fut = cdp.pre_wait_event("Page.loadEventFired")
-    await cdp.send("Page.navigate", {"url": url})
-    await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
+    await cdp.send("Page.navigate", {"url": url}, timeout=TIMEOUT_NAVEGACION)
+    await cdp.wait_future(load_fut, timeout=TIMEOUT_NAVEGACION)
     await aplicar_zoom(cdp)
+
+
+async def verificar_url(cdp: CDPSession, url_esperada: str) -> bool:
+    """Verifica que la URL actual corresponde a la esperada."""
+    result = await ejecutar_js(cdp, "window.location.href;")
+    url_actual = result.get("value", "")
+    base_esperada = url_esperada.split("?")[0]
+    return base_esperada in url_actual or "icpplus" in url_actual
 
 
 async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
@@ -236,7 +284,7 @@ async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
     load_fut = cdp.pre_wait_event("Page.loadEventFired")
     await ejecutar_js(cdp, js_click)
     try:
-        await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
+        await cdp.wait_future(load_fut, timeout=TIMEOUT_NAVEGACION)
     except asyncio.TimeoutError:
         log("Timeout esperando carga de página, continuando...")
     await aplicar_zoom(cdp)
@@ -511,6 +559,12 @@ async def main() -> None:
     ws, cdp = await conectar_brave()
     log_info("Conectado a Brave. Iniciando bucle de búsqueda de cita...")
 
+    backoff = BackoffController(
+        intervalo_base=5.0,
+        max_intervalo=300.0,
+        umbral_alerta=10,
+    )
+
     while True:
         _intento += 1
 
@@ -529,6 +583,15 @@ async def main() -> None:
             # Paso 0: Navegar al inicio
             log("Navegando a URL de inicio...")
             await navegar(cdp, url_inicio)
+
+            # Verificar que la navegación llegó al destino correcto
+            if not await verificar_url(cdp, url_inicio):
+                log("ADVERTENCIA: URL post-navegación no coincide con el inicio.")
+                espera = backoff.registrar_error("navegacion")
+                log(f"Reiniciando ciclo en {espera:.0f}s...")
+                await asyncio.sleep(espera)
+                continue
+
             log("Página cargada")
 
             if PASO_HASTA == 0:
@@ -545,6 +608,7 @@ async def main() -> None:
                 return
 
             if resultado == EstadoPagina.HAY_CITAS:
+                backoff.registrar_exito()
                 print()
                 print("=" * 60)
                 log("*** CITA DISPONIBLE *** — Toma el control del navegador")
@@ -557,6 +621,7 @@ async def main() -> None:
                     mantener_sesion(cdp),
                 )
             elif resultado == EstadoPagina.NO_HAY_CITAS:
+                backoff.registrar_exito()
                 log("Resultado: NO HAY CITAS")
                 log(f"Reintentando en {INTERVALO_REINTENTO}s...")
                 try:
@@ -566,13 +631,19 @@ async def main() -> None:
                 await asyncio.sleep(INTERVALO_REINTENTO)
             else:
                 # EstadoPagina.DESCONOCIDO
-                log("ADVERTENCIA: Estado de página no reconocido. Posible error del portal.")
-                log("Reiniciando ciclo en 15s...")
-                await asyncio.sleep(15)
+                espera = backoff.registrar_error("desconocido")
+                log(f"ADVERTENCIA: Estado de página no reconocido. (error #{backoff.errores_consecutivos})")
+                if backoff.debe_alertar:
+                    log("ALERTA: Demasiados estados desconocidos. Posible cambio en el portal.")
+                log(f"Reiniciando ciclo en {espera:.0f}s...")
+                await asyncio.sleep(espera)
 
         except ConnectionError as e:
-            log(f"Conexión perdida: {e}. Reconectando en 5s...")
-            await asyncio.sleep(5)
+            espera = backoff.registrar_error("conexion")
+            log(f"Conexión perdida: {e}. Reconectando en {espera:.0f}s... (error #{backoff.errores_consecutivos})")
+            if backoff.debe_alertar:
+                log("ALERTA: Demasiados errores de conexión consecutivos.")
+            await asyncio.sleep(espera)
             try:
                 try:
                     await ws.close()
@@ -581,22 +652,28 @@ async def main() -> None:
                 ws, cdp = await conectar_brave()
                 log_info("Reconexión exitosa.")
             except Exception as e2:
-                log(f"Reconexión fallida: {e2}. Reintentando en 15s...")
-                await asyncio.sleep(15)
+                log(f"Reconexión fallida: {e2}. Se reintentará en el próximo ciclo.")
 
         except asyncio.TimeoutError:
-            log("Timeout en carga de página. Reiniciando ciclo...")
-            await asyncio.sleep(5)
+            espera = backoff.registrar_error("timeout")
+            log(f"Timeout en carga de página. Reiniciando en {espera:.0f}s... (error #{backoff.errores_consecutivos})")
+            if backoff.debe_alertar:
+                log("ALERTA: Demasiados timeouts consecutivos. Posible congestión del portal.")
+            await asyncio.sleep(espera)
 
         except RuntimeError as e:
-            log(f"Error JS: {e}")
-            log("Reiniciando ciclo en 10s...")
-            await asyncio.sleep(10)
+            espera = backoff.registrar_error("js_error")
+            log(f"Error JS: {e}. Reiniciando en {espera:.0f}s... (error #{backoff.errores_consecutivos})")
+            if backoff.debe_alertar:
+                log("ALERTA: Demasiados errores JS consecutivos. Posible cambio en el portal.")
+            await asyncio.sleep(espera)
 
         except Exception as e:
-            log(f"Error inesperado: {type(e).__name__}: {e}")
-            log("Reiniciando ciclo en 10s...")
-            await asyncio.sleep(10)
+            espera = backoff.registrar_error("inesperado")
+            log(f"Error inesperado: {type(e).__name__}: {e}. Reiniciando en {espera:.0f}s... (error #{backoff.errores_consecutivos})")
+            if backoff.debe_alertar:
+                log("ALERTA: Demasiados errores inesperados consecutivos.")
+            await asyncio.sleep(espera)
 
 
 if __name__ == "__main__":

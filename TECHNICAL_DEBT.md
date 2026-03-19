@@ -9,18 +9,18 @@
 
 | ID | Título | Severidad | Probabilidad | Estado |
 |----|--------|-----------|-------------|--------|
-| TD-01 | WebSocket muerto sin reconexión | **CRÍTICA** | Alta | Pendiente |
-| TD-02 | Falso positivo en detección de citas | **CRÍTICA** | Media | Pendiente |
-| TD-03 | Escape de strings insuficiente en JS | Media-Alta | Baja | Pendiente |
-| TD-04 | `click_salir()` rompe el loop | Media | Media | Pendiente |
+| TD-01 | WebSocket muerto sin reconexión | **CRÍTICA** | Alta | **Resuelto** |
+| TD-02 | Falso positivo en detección de citas | **CRÍTICA** | Media | **Resuelto** |
+| TD-03 | Escape de strings insuficiente en JS | Media-Alta | Baja | **Resuelto** |
+| TD-04 | `click_salir()` rompe el loop | Media | Media | **Resuelto** |
 | TD-05 | Selección de pestaña no determinista | Media | Baja-Media | Descartada |
 | TD-06 | `asyncio.get_event_loop()` deprecado | Baja-Media | Baja | Descartada |
 | TD-07 | Sin detección de CAPTCHA | Crítica | Media-Alta | Descartada |
-| TD-08 | Keep-alive no genera tráfico HTTP real | Media | Alta | Pendiente |
-| TD-09 | Intervalo fijo sin backoff adaptativo | Media (Diseño) | N/A | Pendiente |
-| TD-10 | Sin tests automatizados | Media (Calidad) | N/A | Pendiente |
+| TD-08 | Keep-alive no genera tráfico HTTP real | Media | Alta | **Resuelto** |
+| TD-09 | Intervalo fijo sin backoff adaptativo | Media (Diseño) | N/A | **Resuelto** |
+| TD-10 | Sin tests automatizados | Media (Calidad) | N/A | **Resuelto** |
 | TD-11 | Alerta sonora inútil en Linux/Mac | Baja | Alta en Linux | Descartada |
-| TD-12 | Timeout uniforme para todas las operaciones CDP | Baja-Media | Baja | Pendiente |
+| TD-12 | Timeout uniforme para todas las operaciones CDP | Baja-Media | Baja | **Resuelto** |
 
 ---
 

@@ -224,7 +224,7 @@ Acciones JS ejecutadas por el script:
 1. El script NO toca nada en la página. La deja exactamente en el estado en que está.
 2. Emite una alerta sonora repetida (bucle de sonido) para que el usuario la oiga aunque no esté delante del PC.
 3. Imprime en consola un mensaje destacado con timestamp.
-4. Entra en un bucle de mantenimiento de sesión: periódicamente (cada 30 segundos) lee `document.title` para evitar que la sesión del portal expire por inactividad.
+4. Entra en un bucle de mantenimiento de sesión: periódicamente (cada 30 segundos) envía un `fetch()` HTTP HEAD a la URL actual del portal con `credentials: 'same-origin'` para mantener la sesión activa server-side.
 5. El bucle de mantenimiento + alerta continúa indefinidamente hasta que el usuario toma el control o para el script con Ctrl+C.
 
 El objetivo es que cuando el usuario llegue al navegador, la página esté exactamente donde el script la dejó, con la sesión activa, lista para que el usuario seleccione hora y confirme manualmente.
@@ -311,23 +311,35 @@ Sin este log no es posible saber si el script lleva horas fallando en silencio.
 
 ---
 
-## 10. Estados inesperados de la página
+## 10. Detección de disponibilidad y estados de la página
 
-El flujo principal contempla dos estados después de solicitar cita:
+Tras solicitar cita (PASO 5), el script evalúa el estado de la página con múltiples verificaciones para evitar falsos positivos:
 
-- "No hay citas disponibles" → reintentar
-- Cualquier otra cosa → asumir cita disponible y alertar
+1. **Contenido mínimo:** Verifica que `document.body.innerText` tiene al menos 50 caracteres (descarta páginas vacías o de error).
+2. **Búsqueda case-insensitive:** Busca `"no hay citas disponibles"` en minúsculas (tolera variaciones del portal).
+3. **Validación estructural:** Confirma que el botón "Salir" (`btnSalir`) existe en la página.
+4. **Verificación de URL:** Comprueba que la URL contiene `icpplus` o `icpplustiem`.
 
-En la práctica, la página puede mostrar otros estados. El script los gestiona mediante tres niveles de error:
+Con estas señales, el script clasifica la página en tres estados:
 
-| Estado | Causa probable | Comportamiento del script |
+| Estado | Condiciones | Comportamiento |
 |---|---|---|
-| Timeout de carga | Conexión lenta o portal saturado | Log del timeout, espera 5s, reinicia ciclo desde PASO 0 |
-| Error JS (`RuntimeError`) | Elemento no encontrado / portal cambió un ID | Log del error con detalle, espera 10s, reinicia ciclo desde PASO 0 |
-| Cualquier otra excepción | Desconexión de Brave, error de red, etc. | Log del error, espera 10s, reinicia ciclo desde PASO 0 |
-| Texto inesperado (sin "no hay citas") | Página de error, CAPTCHA, cambio en el portal | El script lo interpreta como "cita disponible" y emite alerta sonora |
+| **NO HAY CITAS** | Texto "no hay citas" + botón Salir presente | Click en Salir, espera intervalo, reintenta |
+| **HAY CITAS** | Sin texto "no hay citas" + URL válida + contenido suficiente | Alerta sonora + keep-alive de sesión |
+| **DESCONOCIDO** | Página vacía, URL inesperada, o señales contradictorias | Log de advertencia, espera con backoff, reintenta |
 
-El script **nunca se detiene por un error**. Siempre reintenta desde el inicio del ciclo. El único caso donde el script alerta al usuario es cuando la página no contiene el mensaje de "no hay citas" — esto incluye tanto citas reales como estados inesperados. En ambos casos, lo correcto es que el usuario revise el navegador.
+El estado **DESCONOCIDO** nunca se interpreta como "hay cita". Esto evita falsos positivos por errores del portal, páginas de mantenimiento o cargas incompletas.
+
+### Manejo de errores en el ciclo
+
+| Error | Causa probable | Comportamiento |
+|---|---|---|
+| `ConnectionError` | WebSocket muerto, Brave cerrado | Reconexión automática con backoff exponencial |
+| `TimeoutError` | Portal saturado, conexión lenta | Backoff exponencial (5s, 10s, 20s..., max 5min) |
+| `RuntimeError` (JS) | Elemento no encontrado, portal cambió IDs | Backoff exponencial + alerta tras 10 errores consecutivos |
+| Excepción inesperada | Error de red, bug, etc. | Backoff exponencial + alerta tras 10 errores consecutivos |
+
+El script **nunca se detiene por un error**. Tras un ciclo exitoso (con o sin citas), el backoff se resetea al intervalo normal.
 
 ---
 
@@ -415,7 +427,7 @@ Los IDs de elementos HTML están externalizados. Si el portal cambia un ID, se e
 | El portal cambia los IDs de los elementos | Media | IDs externalizados en config.json; corrección inmediata |
 | El portal detecta el patrón de navegación repetida (misma IP, mismo flujo) | Baja-media | Cadencia configurable entre acciones y entre reintentos; no hay fingerprint artificial |
 | El portal añade CAPTCHA en algún paso | Baja | El bot se detiene y el usuario resuelve manualmente |
-| Brave cierra o pierde conexión | Baja | El script detecta la desconexión y muestra error |
+| Brave cierra o pierde conexión | Baja | **Reconexión automática** con backoff exponencial |
 | La página tarda más de lo esperado en cargar | Media | Timeouts configurables por paso |
 
 ---
@@ -467,6 +479,8 @@ Los IDs de elementos HTML están externalizados. Si el portal cambia un ID, se e
 - No hay rotación de IP. Si la IP es bloqueada, reiniciar el router para obtener una nueva IP (en la mayoría de conexiones domésticas españolas).
 - El script opera en una sola pestaña. No abrir otras pestañas ni interactuar con Brave mientras el script está corriendo.
 
+> **Nota:** Si Brave se cierra o la conexión se pierde, el script se reconecta automáticamente. No requiere reinicio manual.
+
 ---
 
 ## 16. Resumen de mapeo de elementos HTML
@@ -492,9 +506,39 @@ URL de inicio: `https://icp.administracionelectronica.gob.es/icpplus/index.html`
 
 ```
 surftbrowsing/
-├── cita_bot.py        # Script principal
-├── config.json        # IDs de elementos HTML del portal
-├── .env.example       # Plantilla de configuración personal
-├── .env               # Configuración personal (no se sube al repo)
-└── README.md          # Este documento
+├── cita_bot.py            # Script principal
+├── config.json            # IDs de elementos HTML del portal
+├── .env.example           # Plantilla de configuración personal
+├── .env                   # Configuración personal (no se sube al repo)
+├── requirements.txt       # Dependencias de producción
+├── requirements-dev.txt   # Dependencias de desarrollo (pytest, coverage)
+├── README.md              # Este documento
+├── TECHNICAL_DEBT.md      # Auditoría técnica detallada (12 ítems analizados)
+└── tests/                 # Tests automatizados (91 tests, 86% cobertura)
+    ├── conftest.py        # Fixtures: MockWebSocket, mock_cdp
+    ├── test_backoff.py    # Tests de BackoffController
+    ├── test_cdp_session.py # Tests de CDPSession (reconexión, timeouts)
+    ├── test_config.py     # Validación de config.json
+    ├── test_detection.py  # Tests de detección de citas (falsos positivos)
+    ├── test_integration.py # Tests de integración (reconexión, backoff, URL)
+    ├── test_js_helpers.py # Tests de safe_js_string (escape de strings)
+    ├── test_main.py       # Tests del bucle principal
+    └── test_navigation.py # Tests de formularios y navegación
 ```
+
+### Ejecutar tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/ -v                         # Todos los tests
+python -m pytest tests/ --cov=cita_bot              # Con cobertura
+```
+
+---
+
+## 18. Deuda técnica
+
+El archivo `TECHNICAL_DEBT.md` documenta 12 puntos de falla identificados en una auditoría exhaustiva del código. De estos:
+
+- **8 resueltos:** TD-01 (reconexión WS), TD-02 (falsos positivos), TD-03 (escape JS), TD-04 (click_salir), TD-08 (keep-alive HTTP), TD-09 (backoff), TD-10 (tests), TD-12 (timeouts)
+- **4 descartados:** TD-05 (selección de pestaña), TD-06 (asyncio deprecado), TD-07 (CAPTCHA), TD-11 (alerta en Linux)
