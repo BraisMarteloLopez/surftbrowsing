@@ -276,7 +276,11 @@ async def verificar_url(cdp: CDPSession, url_esperada: str) -> bool:
     result = await ejecutar_js(cdp, "window.location.href;")
     url_actual = result.get("value", "")
     base_esperada = url_esperada.split("?")[0]
-    return base_esperada in url_actual or "icpplus" in url_actual
+    ok = base_esperada in url_actual or "icpplus" in url_actual
+    if not ok:
+        log_info(f"URL esperada: {url_esperada}")
+        log_info(f"URL actual:   {url_actual}")
+    return ok
 
 
 async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
