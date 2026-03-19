@@ -57,10 +57,10 @@ CDP sobre un navegador real no tiene este problema. El navegador es la instalaci
 - Librerías Python:
 
 ```
-pip install websockets python-dotenv
+pip install -r requirements.txt
 ```
 
-Ninguna otra dependencia.
+Esto instala `websockets` y `python-dotenv`. Ninguna otra dependencia.
 
 ---
 
@@ -202,30 +202,40 @@ Acciones JS ejecutadas por el script:
 
 > **Nota:** El input Nombre tiene `onchange="comprobarDatos()"`, por lo que se dispara evento `change` (no `input`) para activar la validación.
 
-### PASO 5 — Formulario 5: Solicitar cita + comprobación de disponibilidad
+### PASO 5 — Formulario 5: Solicitar cita + evaluación de disponibilidad
 
 Acciones JS ejecutadas por el script:
 
 1. Click en botón "Solicitar Cita" → `getElementById('btnEnviar').click()`
 2. Esperar carga de la respuesta + aplicar zoom 33%
-3. Buscar en el contenido de la página el texto `En este momento no hay citas disponibles.`
+3. Evaluar el estado de la página (ver sección 10 para el detalle completo)
 
 > **Nota:** El botón ejecuta `enviar('solicitud')` al hacer click. Se usa `.click()` para dispararlo.
 
-**Si encuentra el mensaje (no hay cita):**
+La evaluación de la página combina múltiples verificaciones (contenido mínimo, búsqueda case-insensitive del texto de `config.json`, existencia del botón Salir, y verificación de URL) para clasificar la página en tres estados:
 
-1. Hace click en el botón "Salir" → `getElementById('btnSalir').click()`
-2. Este botón ejecuta `goAc_opc_direct()` y devuelve al portal al inicio, manteniendo la sesión
-3. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS`, por defecto 60 segundos)
-4. Repite el proceso completo desde el PASO 0
+**Estado: NO HAY CITAS** (texto "no hay citas" confirmado + botón Salir presente)
 
-**Si NO encuentra el mensaje (hay cita disponible):**
+1. Intenta hacer click en el botón "Salir" → `getElementById('btnSalir').click()`. Si falla, continúa igualmente.
+2. El script espera el intervalo configurado (`INTERVALO_REINTENTO_SEGUNDOS`, por defecto 60 segundos)
+3. Repite el proceso completo desde el PASO 0
+
+**Estado: HAY CITAS** (sin texto "no hay citas" + URL del portal válida + contenido suficiente)
 
 1. El script NO toca nada en la página. La deja exactamente en el estado en que está.
 2. Emite una alerta sonora repetida (bucle de sonido) para que el usuario la oiga aunque no esté delante del PC.
 3. Imprime en consola un mensaje destacado con timestamp.
 4. Entra en un bucle de mantenimiento de sesión: periódicamente (cada 30 segundos) envía un `fetch()` HTTP HEAD a la URL actual del portal con `credentials: 'same-origin'` para mantener la sesión activa server-side.
 5. El bucle de mantenimiento + alerta continúa indefinidamente hasta que el usuario toma el control o para el script con Ctrl+C.
+
+**Estado: DESCONOCIDO** (página vacía, URL inesperada, o señales contradictorias)
+
+1. El script registra una advertencia en el log.
+2. Espera un intervalo con backoff exponencial (5s, 10s, 20s... hasta 5 minutos).
+3. Repite el proceso completo desde el PASO 0.
+4. Si se acumulan 10 estados desconocidos consecutivos, muestra una alerta especial en el log.
+
+> **Importante:** El estado DESCONOCIDO nunca se trata como "hay cita". Esto evita falsos positivos por errores del portal, páginas de mantenimiento o cargas incompletas.
 
 El objetivo es que cuando el usuario llegue al navegador, la página esté exactamente donde el script la dejó, con la sesión activa, lista para que el usuario seleccione hora y confirme manualmente.
 
@@ -296,16 +306,33 @@ El script imprime en consola un log por cada intento con el siguiente formato:
 
 ```
 [2026-03-18 09:15:32] Intento #1 — Navegando a URL de inicio...
-[2026-03-18 09:15:35] Intento #1 — Formulario 1: provincia seleccionada
-[2026-03-18 09:15:38] Intento #1 — Formulario 2: trámite seleccionado
-[2026-03-18 09:15:40] Intento #1 — Formulario 3: aviso aceptado
-[2026-03-18 09:15:43] Intento #1 — Formulario 4: datos personales rellenados
-[2026-03-18 09:15:46] Intento #1 — Formulario 5: cita solicitada
-[2026-03-18 09:15:49] Intento #1 — Resultado: NO HAY CITAS. Reintentando en 60s...
+[2026-03-18 09:15:35] Intento #1 — Formulario 1: seleccionando provincia Madrid
+[2026-03-18 09:15:38] Intento #1 — Formulario 2: seleccionando trámite
+[2026-03-18 09:15:40] Intento #1 — Formulario 3: aceptando aviso
+[2026-03-18 09:15:43] Intento #1 — Formulario 4: rellenando datos personales
+[2026-03-18 09:15:46] Intento #1 — Formulario 5: solicitando cita
+[2026-03-18 09:15:49] Intento #1 — Resultado: NO HAY CITAS
+[2026-03-18 09:15:49] Intento #1 — Reintentando en 60s...
 [2026-03-18 09:16:49] Intento #2 — Navegando a URL de inicio...
 ...
-[2026-03-18 11:42:17] Intento #87 — Resultado: *** CITA DISPONIBLE *** — Toma el control del navegador
+[2026-03-18 11:42:17] Intento #87 — *** CITA DISPONIBLE *** — Toma el control del navegador
 ```
+
+Cuando hay errores, el log incluye información de backoff:
+
+```
+[2026-03-18 09:20:15] Intento #5 — Timeout en carga de página. Reiniciando en 5s... (error #1)
+[2026-03-18 09:20:25] Intento #6 — Timeout en carga de página. Reiniciando en 10s... (error #2)
+[2026-03-18 09:20:40] Intento #7 — Timeout en carga de página. Reiniciando en 20s... (error #3)
+```
+
+Tras 10 errores consecutivos del mismo tipo, el log muestra una alerta especial:
+
+```
+[2026-03-18 09:25:00] Intento #15 — ALERTA: Demasiados timeouts consecutivos. Posible congestión del portal.
+```
+
+El backoff se resetea automáticamente tras un ciclo exitoso (con o sin citas).
 
 Sin este log no es posible saber si el script lleva horas fallando en silencio.
 
@@ -463,6 +490,20 @@ Los IDs de elementos HTML están externalizados. Si el portal cambia un ID, se e
 - Es el comportamiento esperado. Las citas para este trámite en Madrid se liberan esporádicamente.
 - Verificar en el log que el script está completando ciclos (no se ha quedado atascado en un paso).
 - Considerar reducir el intervalo de reintento si es muy conservador (no bajar de 30 segundos).
+
+### "El log muestra ALERTA: Demasiados errores consecutivos"
+
+- El script lleva 10+ errores seguidos sin completar un ciclo.
+- Si son **timeouts**: el portal está saturado o la conexión es lenta. El backoff ya está espaciando los reintentos automáticamente.
+- Si son **errores JS**: el portal probablemente cambió algún ID. Abrir DevTools (F12), verificar IDs y actualizar `config.json`.
+- Si son **errores de conexión**: Brave puede haberse cerrado o la red cayó. El script intenta reconectar automáticamente.
+
+### "El log muestra ADVERTENCIA: Estado de página no reconocido"
+
+- La página no coincide con ningún estado esperado (ni "no hay citas" ni una cita real).
+- Puede ser: página de mantenimiento, error 500, redirección inesperada, o cambio en el portal.
+- Navegar manualmente al portal y verificar que sigue operativo.
+- Si el portal funciona pero el bot sigue mostrando este aviso, inspeccionar el HTML con F12 y verificar que el texto y botones de `config.json` siguen siendo correctos.
 
 ### "El script se detuvo con un error no reconocido"
 

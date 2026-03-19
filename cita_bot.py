@@ -410,8 +410,9 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
         return EstadoPagina.DESCONOCIDO
 
     # 3. Buscar texto de "no hay citas" (case-insensitive, parcial)
-    texto_check = await ejecutar_js(cdp, """
-        document.body.innerText.toLowerCase().includes('no hay citas disponibles');
+    texto_buscar = safe_js_string(ids["texto_no_hay_citas"].lower())
+    texto_check = await ejecutar_js(cdp, f"""
+        document.body.innerText.toLowerCase().includes('{texto_buscar}');
     """)
     if texto_check.get("value", False):
         # 4. Confirmar que el botón Salir existe (estamos en la página correcta)
