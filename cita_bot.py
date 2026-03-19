@@ -492,14 +492,16 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
     return EstadoPagina.HAY_CITAS
 
 
-async def click_salir(cdp: CDPSession, ids: dict) -> None:
-    """Click en botón Salir de la página sin citas."""
+async def click_salir(cdp: CDPSession, ids: dict) -> bool:
+    """Click en botón Salir. Devuelve True si tuvo éxito, False si no pudo."""
     boton_id = safe_js_string(ids["boton_salir_nocita"])
 
     if not await esperar_elemento(cdp, ids["boton_salir_nocita"]):
-        raise RuntimeError(f"Elemento #{ids['boton_salir_nocita']} no apareció tras carga de página")
+        log("Botón Salir no encontrado, se navegará al inicio directamente")
+        return False
 
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -677,12 +679,8 @@ async def main() -> None:
             elif resultado == EstadoPagina.NO_HAY_CITAS:
                 backoff.registrar_exito()
                 log("Resultado: NO HAY CITAS")
-                try:
-                    await click_salir(cdp, ids)
-                    # Salir nos devuelve al inicio del portal — no navegar de nuevo
+                if await click_salir(cdp, ids):
                     skip_navegacion = True
-                except (RuntimeError, asyncio.TimeoutError) as e:
-                    log(f"Aviso: click_salir() falló ({e}). Navegación completa en el siguiente ciclo.")
                 espera = intervalo_con_jitter(INTERVALO_REINTENTO)
                 log(f"Reintentando en {espera:.0f}s...")
                 await asyncio.sleep(espera)

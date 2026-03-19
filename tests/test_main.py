@@ -300,10 +300,10 @@ class TestMainValidation:
     @patch("cita_bot.ciclo_completo", new_callable=AsyncMock)
     @patch("cita_bot.click_salir", new_callable=AsyncMock)
     @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
-    async def test_main_click_salir_falla_continua(self, mock_sleep, mock_salir,
-                                                    mock_ciclo, mock_verify,
-                                                    mock_nav, mock_connect):
-        """Si click_salir falla, main() no propaga el error."""
+    async def test_main_click_salir_falla_navega_inicio(self, mock_sleep, mock_salir,
+                                                        mock_ciclo, mock_verify,
+                                                        mock_nav, mock_connect):
+        """Si click_salir devuelve False, el siguiente ciclo navega al inicio."""
         from cita_bot import main, CDPSession, EstadoPagina
 
         mock_cdp = AsyncMock(spec=CDPSession)
@@ -321,11 +321,13 @@ class TestMainValidation:
             raise KeyboardInterrupt()
 
         mock_ciclo.side_effect = ciclo_side_effect
-        mock_salir.side_effect = RuntimeError("Botón no encontrado")
+        mock_salir.return_value = False  # botón no encontrado
 
         with pytest.raises(KeyboardInterrupt):
             await main()
-        # No propagó RuntimeError de click_salir
+        # click_salir devolvió False → skip_navegacion no se activa
+        # → segundo ciclo llama a navegar()
+        assert mock_nav.call_count == 2
 
     @pytest.mark.asyncio
     @patch("cita_bot.NIE", "X1234567A")

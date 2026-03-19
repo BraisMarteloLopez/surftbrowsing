@@ -123,12 +123,22 @@ class TestClickSalir:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=True)
-    async def test_click_salir_usa_safe_js(self, mock_esperar, mock_click, ids):
+    async def test_click_salir_exito(self, mock_esperar, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
-        await click_salir(cdp, ids)
+        result = await click_salir(cdp, ids)
+        assert result is True
         mock_esperar.assert_called_once()
         js_code = mock_click.call_args[0][1]
         assert "btnSalir" in js_code
+
+    @pytest.mark.asyncio
+    @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
+    @patch("cita_bot.esperar_elemento", new_callable=AsyncMock, return_value=False)
+    async def test_click_salir_boton_no_encontrado(self, mock_esperar, mock_click, ids):
+        cdp = AsyncMock(spec=CDPSession)
+        result = await click_salir(cdp, ids)
+        assert result is False
+        mock_click.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
