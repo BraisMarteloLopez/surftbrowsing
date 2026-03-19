@@ -13,9 +13,10 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from cdp_helpers import CDPSession, ejecutar_js
 from cita_bot import (
-    CDPSession, EstadoPagina, BackoffController,
-    evaluar_estado_pagina, verificar_url, ejecutar_js,
+    EstadoPagina, BackoffController,
+    evaluar_estado_pagina, verificar_url,
 )
 
 

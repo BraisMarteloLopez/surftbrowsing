@@ -9,7 +9,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cita_bot import EstadoPagina, evaluar_estado_pagina, detectar_waf, WafBanError, CDPSession
+from cdp_helpers import CDPSession
+from cita_bot import EstadoPagina, evaluar_estado_pagina, detectar_waf, WafBanError
 
 
 def _make_ejecutar_js_mock(responses: list[dict]):

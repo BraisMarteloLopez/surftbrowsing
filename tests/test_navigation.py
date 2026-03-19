@@ -9,8 +9,9 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from cdp_helpers import CDPSession, ejecutar_js, safe_js_string
 from cita_bot import (
-    CDPSession, EstadoPagina, WafBanError,
+    EstadoPagina, WafBanError,
     navegar, click_y_esperar_carga, scroll_humano, verificar_url,
     esperar_elemento, click_salir, delay, pausa_entre_pasos,
     limpiar_datos_navegador,
@@ -19,7 +20,7 @@ from cita_bot import (
     paso_formulario_1, paso_formulario_2, paso_formulario_3,
     paso_formulario_4, paso_formulario_5,
     ciclo_completo, evaluar_estado_pagina, detectar_waf,
-    safe_js_string, ejecutar_js, intervalo_con_jitter,
+    intervalo_con_jitter,
 )
 
 

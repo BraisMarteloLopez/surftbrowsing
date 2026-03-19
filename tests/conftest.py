@@ -78,7 +78,7 @@ def mock_ws():
 @pytest_asyncio.fixture
 async def mock_cdp(mock_ws):
     """Crea un CDPSession con MockWebSocket, con listener arrancado."""
-    from cita_bot import CDPSession
+    from cdp_helpers import CDPSession
     cdp = CDPSession(mock_ws)
     await cdp.start()
     # Dar tiempo al listener para arrancar

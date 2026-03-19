@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cita_bot import CDPSession
+from cdp_helpers import CDPSession
 
 
 @pytest.mark.asyncio
