@@ -198,9 +198,12 @@ class TestPasoFormulario1:
     async def test_formulario_1_selecciona_provincia(self, mock_esperar, mock_ejs, mock_click, mock_humano, ids):
         await paso_formulario_1(mock_humano, ids)
 
-        mock_humano.scroll.assert_called_once()
         mock_esperar.assert_called_once()
-        mock_humano.movimiento_idle.assert_called_once()
+        assert mock_humano.secuencia_pre_accion.call_count == 2
+        # Primera secuencia: mover al dropdown
+        mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["dropdown_provincia"])
+        # Segunda secuencia: mover al botón
+        mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["boton_aceptar_f1"])
         js_code = mock_ejs.call_args[0][1]
         assert "form" in js_code
         assert safe_js_string(ids["valor_madrid"]) in js_code
@@ -220,9 +223,10 @@ class TestPasoFormulario2:
     async def test_formulario_2_selecciona_tramite(self, mock_esperar, mock_ejs, mock_click, mock_humano, ids):
         await paso_formulario_2(mock_humano, ids)
 
-        mock_humano.scroll.assert_called_once()
         mock_esperar.assert_called_once()
-        mock_humano.movimiento_idle.assert_called_once()
+        assert mock_humano.secuencia_pre_accion.call_count == 2
+        mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["dropdown_tramite"])
+        mock_humano.secuencia_pre_accion.assert_any_call(element_id=ids["boton_aceptar_f2"])
         js_code = mock_ejs.call_args[0][1]
         assert safe_js_string(ids["dropdown_tramite"]) in js_code
         assert "4112" in js_code
@@ -239,9 +243,8 @@ class TestPasoFormulario3:
     async def test_formulario_3_click_entrar(self, mock_esperar, mock_click, mock_humano, ids):
         await paso_formulario_3(mock_humano, ids)
 
-        mock_humano.scroll.assert_called_once()
         mock_esperar.assert_called_once()
-        mock_humano.movimiento_idle.assert_called_once()
+        mock_humano.secuencia_pre_accion.assert_called_once_with(element_id=ids["boton_entrar_f3"])
         click_js = mock_click.call_args[0][1]
         assert "btnEntrar" in click_js
 
@@ -285,7 +288,8 @@ class TestPasoFormulario4:
         await paso_formulario_4(mock_humano, ids)
 
         mock_esperar.assert_called_once()
-        mock_humano.movimiento_idle.assert_called_once()
+        # 3 secuencias: campo1, campo2, botón
+        assert mock_humano.secuencia_pre_accion.call_count == 3
         assert mock_ejs.call_count == 2
         nie_js = mock_ejs.call_args_list[0][0][1]
         nombre_js = mock_ejs.call_args_list[1][0][1]
@@ -349,8 +353,7 @@ class TestPasoFormulario5:
         await paso_formulario_5(mock_humano, ids)
 
         mock_esperar.assert_called_once()
-        mock_humano.movimiento_idle.assert_called_once()
-        mock_humano.mover_a_elemento.assert_called_once()
+        mock_humano.secuencia_pre_accion.assert_called_once_with(element_id=ids["boton_solicitar_cita"])
         click_js = mock_click.call_args[0][1]
         assert "btnEnviar" in click_js
 

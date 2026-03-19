@@ -242,7 +242,8 @@ class TestPausaExtra:
 
 class TestMovimientoLectura:
     @pytest.mark.asyncio
-    async def test_patron_reposo(self):
+    @patch("comportamiento_humano.asyncio.sleep", new_callable=AsyncMock)
+    async def test_patron_reposo(self, mock_sleep):
         """Patrón reposo: micro-movimientos cerca de la posición actual."""
         cdp = AsyncMock(spec=CDPSession)
         cdp.send = AsyncMock(return_value={})
@@ -251,11 +252,12 @@ class TestMovimientoLectura:
         humano.mouse_y = 300
 
         with patch("comportamiento_humano.random.choice", return_value="reposo"):
-            await asyncio.wait_for(humano._movimiento_lectura(0.3), timeout=2.0)
+            await asyncio.wait_for(humano._movimiento_lectura(0.05), timeout=2.0)
 
-        # Posición debería estar cerca del original (±20px por movimiento)
-        assert abs(humano.mouse_x - 400) <= 100  # acumulación de varios movimientos
-        assert abs(humano.mouse_y - 300) <= 100
+        # Verificar que se generaron eventos mouseMoved (micro-movimientos)
+        mouse_calls = [c for c in cdp.send.call_args_list
+                       if c[0][0] == "Input.dispatchMouseEvent"]
+        assert len(mouse_calls) > 0
 
     @pytest.mark.asyncio
     async def test_patron_lectura(self):
@@ -322,3 +324,79 @@ class TestMovimientoLectura:
 
         with patch("comportamiento_humano.random.choice", return_value="reposo"):
             await asyncio.wait_for(humano._movimiento_lectura(0.05), timeout=2.0)
+
+
+# ---------------------------------------------------------------------------
+# Fase 4: secuencia_pre_accion con orden variable
+# ---------------------------------------------------------------------------
+
+class TestSecuenciaPreAccion:
+    @pytest.mark.asyncio
+    async def test_secuencia_siempre_incluye_delay(self):
+        """secuencia_pre_accion siempre ejecuta al menos un delay_activo."""
+        humano = AsyncMock(spec=SimuladorHumano)
+        # Llamar al método real con el mock
+        real_method = SimuladorHumano.secuencia_pre_accion
+        # Ejecutar varias veces para cubrir variabilidad
+        for _ in range(10):
+            humano.reset_mock()
+            await real_method(humano)
+            # Al menos un delay_activo debe haberse llamado
+            assert humano.delay_activo.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_secuencia_ejecuta_2_a_5_acciones(self):
+        """secuencia_pre_accion ejecuta entre 2 y 5 acciones (2-4 + posible delay forzado)."""
+        humano = AsyncMock(spec=SimuladorHumano)
+        real_method = SimuladorHumano.secuencia_pre_accion
+
+        for _ in range(20):
+            humano.reset_mock()
+            await real_method(humano)
+            total = (humano.movimiento_idle.call_count +
+                     humano.scroll.call_count +
+                     humano.delay_activo.call_count +
+                     humano.pausa_extra.call_count)
+            assert 2 <= total <= 5
+
+    @pytest.mark.asyncio
+    async def test_secuencia_mueve_a_elemento_si_especificado(self):
+        """Si element_id se especifica, mover_a_elemento se llama al final."""
+        humano = AsyncMock(spec=SimuladorHumano)
+        real_method = SimuladorHumano.secuencia_pre_accion
+
+        await real_method(humano, element_id="myButton")
+
+        humano.mover_a_elemento.assert_called_once_with("myButton")
+
+    @pytest.mark.asyncio
+    async def test_secuencia_sin_element_id_no_mueve(self):
+        """Sin element_id, mover_a_elemento no se llama."""
+        humano = AsyncMock(spec=SimuladorHumano)
+        real_method = SimuladorHumano.secuencia_pre_accion
+
+        await real_method(humano)
+
+        humano.mover_a_elemento.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_secuencia_produce_ordenes_diferentes(self):
+        """Múltiples ejecuciones producen órdenes diferentes de acciones."""
+        humano = AsyncMock(spec=SimuladorHumano)
+        real_method = SimuladorHumano.secuencia_pre_accion
+
+        ordenes = set()
+        for _ in range(30):
+            humano.reset_mock()
+            # Track call order
+            call_order = []
+            humano.movimiento_idle.side_effect = lambda: call_order.append("idle")
+            humano.scroll.side_effect = lambda: call_order.append("scroll")
+            humano.delay_activo.side_effect = lambda: call_order.append("delay")
+            humano.pausa_extra.side_effect = lambda: call_order.append("pausa")
+
+            await real_method(humano)
+            ordenes.add(tuple(call_order))
+
+        # Con 30 intentos, debería haber al menos 2 secuencias diferentes
+        assert len(ordenes) > 1

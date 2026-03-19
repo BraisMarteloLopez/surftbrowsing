@@ -393,6 +393,36 @@ class SimuladorHumano:
                 except asyncio.CancelledError:
                     pass
 
+    # --- Secuencia pre-acción con orden variable ---
+
+    async def secuencia_pre_accion(self, element_id: str | None = None) -> None:
+        """Ejecuta una secuencia pre-acción con orden variable.
+
+        Elige aleatoriamente entre varias combinaciones de acciones
+        preparatorias, de modo que no todos los pasos del formulario
+        tengan exactamente el mismo patrón temporal.
+
+        Siempre incluye al menos un delay_activo. Si se especifica
+        element_id, mueve el ratón al elemento al final.
+        """
+        acciones_posibles = [
+            ("idle", lambda: self.movimiento_idle()),
+            ("scroll", lambda: self.scroll()),
+            ("delay", lambda: self.delay_activo()),
+            ("pausa", lambda: self.pausa_extra()),
+        ]
+
+        seleccion = random.sample(acciones_posibles, k=random.randint(2, 4))
+        if not any(nombre == "delay" for nombre, _ in seleccion):
+            seleccion.append(("delay", lambda: self.delay_activo()))
+        random.shuffle(seleccion)
+
+        for _nombre, accion in seleccion:
+            await accion()
+
+        if element_id:
+            await self.mover_a_elemento(element_id)
+
     # --- Movimiento de fondo durante pausas ---
 
     async def _movimiento_lectura(self, duracion: float) -> None:

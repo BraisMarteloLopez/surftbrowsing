@@ -186,21 +186,13 @@ async def paso_formulario_1(humano: SimuladorHumano, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["dropdown_provincia"]):
         raise RuntimeError(f"Elemento #{ids['dropdown_provincia']} no apareció tras carga de página")
 
-    await humano.movimiento_idle()
-    await humano.scroll()
-    await humano.delay_activo()
-    await humano.pausa_extra()
-
-    # Mover ratón al dropdown antes de interactuar
-    await humano.mover_a_elemento(ids["dropdown_provincia"])
+    await humano.secuencia_pre_accion(element_id=ids["dropdown_provincia"])
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
         document.getElementById('{dropdown_id}').dispatchEvent(new Event('change', {{ bubbles: true }}));
     """)
 
-    await humano.delay_activo()
-    await humano.mover_a_elemento(ids["boton_aceptar_f1"])
-    await humano.pausa_extra()
+    await humano.secuencia_pre_accion(element_id=ids["boton_aceptar_f1"])
     log("Formulario 1: provincia seleccionada, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -217,19 +209,13 @@ async def paso_formulario_2(humano: SimuladorHumano, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["dropdown_tramite"]):
         raise RuntimeError(f"Elemento #{ids['dropdown_tramite']} no apareció tras carga de página")
 
-    await humano.movimiento_idle()
-    await humano.scroll()
-    await humano.delay_activo()
-
-    await humano.mover_a_elemento(ids["dropdown_tramite"])
-    await humano.pausa_extra()
+    await humano.secuencia_pre_accion(element_id=ids["dropdown_tramite"])
     await ejecutar_js(cdp, f"""
         document.getElementById('{dropdown_id}').value = '{valor}';
         document.getElementById('{dropdown_id}').dispatchEvent(new Event('change', {{ bubbles: true }}));
     """)
 
-    await humano.delay_activo()
-    await humano.mover_a_elemento(ids["boton_aceptar_f2"])
+    await humano.secuencia_pre_accion(element_id=ids["boton_aceptar_f2"])
     log("Formulario 2: trámite seleccionado, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -244,12 +230,7 @@ async def paso_formulario_3(humano: SimuladorHumano, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["boton_entrar_f3"]):
         raise RuntimeError(f"Elemento #{ids['boton_entrar_f3']} no apareció tras carga de página")
 
-    await humano.movimiento_idle()
-    await humano.scroll()
-    await humano.delay_activo()
-    await humano.pausa_extra()
-
-    await humano.mover_a_elemento(ids["boton_entrar_f3"])
+    await humano.secuencia_pre_accion(element_id=ids["boton_entrar_f3"])
     log("Formulario 3: aviso aceptado, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -281,7 +262,6 @@ async def paso_formulario_4(humano: SimuladorHumano, ids: dict) -> None:
     """
     cdp = humano.cdp
     log("Formulario 4: rellenando datos personales")
-    await humano.delay_activo()
 
     input_nie = safe_js_string(ids["input_nie"])
     input_nombre = safe_js_string(ids["input_nombre"])
@@ -291,29 +271,19 @@ async def paso_formulario_4(humano: SimuladorHumano, ids: dict) -> None:
     if not await esperar_elemento(cdp, ids["input_nie"]):
         raise RuntimeError(f"Elemento #{ids['input_nie']} no apareció tras carga de página")
 
-    await humano.movimiento_idle()
-    await humano.pausa_extra()
-
     # Orden aleatorio: a veces NIE primero, a veces nombre primero
     if random.random() < 0.5:
-        # NIE → Nombre (orden original)
-        await humano.mover_a_elemento(ids["input_nie"])
+        await humano.secuencia_pre_accion(element_id=ids["input_nie"])
         await _rellenar_campo_nie(cdp, input_nie)
-        await humano.delay_activo()
-        await humano.mover_a_elemento(ids["input_nombre"])
-        await humano.pausa_extra()
+        await humano.secuencia_pre_accion(element_id=ids["input_nombre"])
         await _rellenar_campo_nombre(cdp, input_nombre)
     else:
-        # Nombre → NIE (orden invertido)
-        await humano.mover_a_elemento(ids["input_nombre"])
+        await humano.secuencia_pre_accion(element_id=ids["input_nombre"])
         await _rellenar_campo_nombre(cdp, input_nombre)
-        await humano.delay_activo()
-        await humano.mover_a_elemento(ids["input_nie"])
-        await humano.pausa_extra()
+        await humano.secuencia_pre_accion(element_id=ids["input_nie"])
         await _rellenar_campo_nie(cdp, input_nie)
 
-    await humano.delay_activo()
-    await humano.mover_a_elemento(ids["boton_aceptar_f4"])
+    await humano.secuencia_pre_accion(element_id=ids["boton_aceptar_f4"])
     log("Formulario 4: datos enviados, esperando carga...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
@@ -322,17 +292,13 @@ async def paso_formulario_5(humano: SimuladorHumano, ids: dict) -> None:
     """Formulario 5: Solicitar cita."""
     cdp = humano.cdp
     log("Formulario 5: solicitando cita")
-    await humano.delay_activo()
 
     boton_id = safe_js_string(ids["boton_solicitar_cita"])
 
     if not await esperar_elemento(cdp, ids["boton_solicitar_cita"]):
         raise RuntimeError(f"Elemento #{ids['boton_solicitar_cita']} no apareció tras carga de página")
 
-    await humano.movimiento_idle()
-    await humano.pausa_extra()
-    await humano.mover_a_elemento(ids["boton_solicitar_cita"])
-
+    await humano.secuencia_pre_accion(element_id=ids["boton_solicitar_cita"])
     log("Formulario 5: cita solicitada, esperando respuesta...")
     await click_y_esperar_carga(cdp, f"document.getElementById('{boton_id}').click();")
 
