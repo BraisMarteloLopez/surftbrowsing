@@ -29,6 +29,7 @@ load_dotenv()
 
 NIE = os.getenv("NIE", "").strip()
 NOMBRE = os.getenv("NOMBRE", "").strip()
+PASO_INICIO = int(os.getenv("PASO_INICIO", "1"))
 INTERVALO_REINTENTO = float(os.getenv("INTERVALO_REINTENTO_SEGUNDOS", "60"))
 DELAY_ACCION = float(os.getenv("DELAY_ENTRE_ACCIONES_SEGUNDOS", "1.0"))
 TIMEOUT_PAGINA = float(os.getenv("TIMEOUT_CARGA_PAGINA_SEGUNDOS", "15"))
@@ -321,13 +322,25 @@ async def mantener_sesion(cdp: CDPSession) -> None:
 # Bucle principal
 # ---------------------------------------------------------------------------
 
-async def ciclo_completo(cdp: CDPSession, ids: dict) -> bool:
-    """Ejecuta un ciclo completo de formularios. Devuelve True si hay cita."""
-    await paso_formulario_1(cdp, ids)
-    await paso_formulario_2(cdp, ids)
-    await paso_formulario_3(cdp, ids)
-    await paso_formulario_4(cdp, ids)
-    await paso_formulario_5(cdp, ids)
+async def ciclo_completo(cdp: CDPSession, ids: dict, paso_inicio: int = 1) -> bool:
+    """Ejecuta un ciclo completo de formularios. Devuelve True si hay cita.
+
+    Si paso_inicio > 1, salta los formularios anteriores. El navegador debe
+    estar ya posicionado en la página correspondiente al paso indicado.
+    """
+    pasos = [
+        (1, paso_formulario_1),
+        (2, paso_formulario_2),
+        (3, paso_formulario_3),
+        (4, paso_formulario_4),
+        (5, paso_formulario_5),
+    ]
+
+    for num, fn in pasos:
+        if num < paso_inicio:
+            log(f"Saltando formulario {num} (PASO_INICIO={paso_inicio})")
+            continue
+        await fn(cdp, ids)
 
     if await hay_cita_disponible(cdp, ids):
         return True
@@ -361,8 +374,14 @@ async def main() -> None:
     url_inicio = config["url_inicio"]
     ids = config["ids"]
 
+    if not 1 <= PASO_INICIO <= 5:
+        print(f"ERROR: PASO_INICIO debe ser entre 1 y 5, recibido: {PASO_INICIO}")
+        sys.exit(1)
+
     log_info(f"Configuración cargada — NIE: {NIE[:3]}*** / Nombre: {NOMBRE.split()[0]}***")
     log_info(f"Intervalo reintento: {INTERVALO_REINTENTO}s / Delay acciones: {DELAY_ACCION}s / Timeout: {TIMEOUT_PAGINA}s")
+    if PASO_INICIO > 1:
+        log_info(f"Modo depuración: empezando desde el paso {PASO_INICIO} (el navegador debe estar en esa página)")
 
     # Conectar a Brave
     log_info("Conectando a Brave via CDP...")
@@ -381,13 +400,16 @@ async def main() -> None:
             _intento += 1
 
             try:
-                # Navegar al inicio
-                log("Navegando a URL de inicio...")
-                await navegar(cdp, url_inicio)
-                log("Página cargada")
+                # Navegar al inicio (solo si empezamos desde el paso 1)
+                if PASO_INICIO == 1:
+                    log("Navegando a URL de inicio...")
+                    await navegar(cdp, url_inicio)
+                    log("Página cargada")
+                else:
+                    log(f"Saltando navegación inicial (PASO_INICIO={PASO_INICIO})")
 
                 # Ciclo de formularios
-                cita_encontrada = await ciclo_completo(cdp, ids)
+                cita_encontrada = await ciclo_completo(cdp, ids, PASO_INICIO)
 
                 if cita_encontrada:
                     print()
