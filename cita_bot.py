@@ -287,8 +287,9 @@ async def ejecutar_js(cdp: CDPSession, expression: str,
     return result.get("result", {}).get("result", {})
 
 
-async def scroll_humano(cdp: CDPSession, pasos: int = 3) -> None:
-    """Simula scroll humano hacia abajo: N pasos con distancia y delay aleatorios."""
+async def scroll_humano(cdp: CDPSession) -> None:
+    """Simula scroll humano hacia abajo: 2-4 pasos con distancia y delay aleatorios."""
+    pasos = random.randint(2, 4)
     for _ in range(pasos):
         distancia = random.randint(100, 300)
         await ejecutar_js(cdp, f"window.scrollBy({{ top: {distancia}, behavior: 'smooth' }});")

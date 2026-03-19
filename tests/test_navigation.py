@@ -46,11 +46,13 @@ def ids():
 
 class TestScrollHumano:
     @pytest.mark.asyncio
+    @patch("cita_bot.random.randint", return_value=3)
     @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_scroll_ejecuta_n_pasos(self, mock_ejs, mock_sleep):
+    async def test_scroll_ejecuta_pasos_aleatorios(self, mock_ejs, mock_sleep, mock_randint):
         cdp = AsyncMock(spec=CDPSession)
-        await scroll_humano(cdp, pasos=3)
+        await scroll_humano(cdp)
+        # randint(2, 4) mockeado a 3 → 3 llamadas a scrollBy
         assert mock_ejs.call_count == 3
         for call_args in mock_ejs.call_args_list:
             js_code = call_args[0][1]
@@ -60,10 +62,11 @@ class TestScrollHumano:
     @pytest.mark.asyncio
     @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_scroll_pasos_default(self, mock_ejs, mock_sleep):
+    async def test_scroll_pasos_entre_2_y_4(self, mock_ejs, mock_sleep):
+        """scroll_humano ejecuta entre 2 y 4 pasos."""
         cdp = AsyncMock(spec=CDPSession)
         await scroll_humano(cdp)
-        assert mock_ejs.call_count == 3  # default pasos=3
+        assert 2 <= mock_ejs.call_count <= 4
 
 
 # ---------------------------------------------------------------------------
