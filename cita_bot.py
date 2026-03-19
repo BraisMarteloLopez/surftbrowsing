@@ -256,9 +256,12 @@ async def ejecutar_js(cdp: CDPSession, expression: str,
     return result.get("result", {}).get("result", {})
 
 
-async def aplicar_zoom(cdp: CDPSession) -> None:
-    """Fija el zoom del navegador al 33% para que la página quepa en pantalla."""
-    await ejecutar_js(cdp, "document.body.style.zoom = '0.33';")
+async def scroll_humano(cdp: CDPSession, pasos: int = 3) -> None:
+    """Simula scroll humano hacia abajo: N pasos con distancia y delay aleatorios."""
+    for _ in range(pasos):
+        distancia = random.randint(100, 300)
+        await ejecutar_js(cdp, f"window.scrollBy({{ top: {distancia}, behavior: 'smooth' }});")
+        await asyncio.sleep(random.uniform(0.4, 1.2))
 
 
 async def navegar(cdp: CDPSession, url: str) -> None:
@@ -268,7 +271,6 @@ async def navegar(cdp: CDPSession, url: str) -> None:
     load_fut = cdp.pre_wait_event("Page.loadEventFired")
     await cdp.send("Page.navigate", {"url": url}, timeout=TIMEOUT_NAVEGACION)
     await cdp.wait_future(load_fut, timeout=TIMEOUT_NAVEGACION)
-    await aplicar_zoom(cdp)
 
 
 async def verificar_url(cdp: CDPSession, url_esperada: str) -> bool:
@@ -291,7 +293,6 @@ async def click_y_esperar_carga(cdp: CDPSession, js_click: str) -> None:
         await cdp.wait_future(load_fut, timeout=TIMEOUT_NAVEGACION)
     except asyncio.TimeoutError:
         log("Timeout esperando carga de página, continuando...")
-    await aplicar_zoom(cdp)
 
 
 async def delay() -> None:
@@ -310,6 +311,7 @@ async def delay() -> None:
 async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
     """Formulario 1: Selección de provincia (Madrid)."""
     log("Formulario 1: seleccionando provincia Madrid")
+    await scroll_humano(cdp)
     await delay()
 
     dropdown_id = safe_js_string(ids["dropdown_provincia"])
@@ -329,6 +331,7 @@ async def paso_formulario_1(cdp: CDPSession, ids: dict) -> None:
 async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
     """Formulario 2: Selección de trámite."""
     log("Formulario 2: seleccionando trámite")
+    await scroll_humano(cdp)
     await delay()
 
     dropdown_id = safe_js_string(ids["dropdown_tramite"])
@@ -348,6 +351,7 @@ async def paso_formulario_2(cdp: CDPSession, ids: dict) -> None:
 async def paso_formulario_3(cdp: CDPSession, ids: dict) -> None:
     """Formulario 3: Aviso informativo — click en Entrar."""
     log("Formulario 3: aceptando aviso")
+    await scroll_humano(cdp)
     await delay()
 
     boton_id = safe_js_string(ids["boton_entrar_f3"])

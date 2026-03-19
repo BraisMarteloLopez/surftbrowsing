@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cita_bot import (
     CDPSession, EstadoPagina,
-    navegar, click_y_esperar_carga, aplicar_zoom, verificar_url,
+    navegar, click_y_esperar_carga, scroll_humano, verificar_url,
     click_salir, delay,
     paso_formulario_1, paso_formulario_2, paso_formulario_3,
     paso_formulario_4, paso_formulario_5,
@@ -43,14 +43,26 @@ def ids():
 # aplicar_zoom
 # ---------------------------------------------------------------------------
 
-class TestAplicarZoom:
+class TestScrollHumano:
     @pytest.mark.asyncio
+    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_aplica_zoom_33(self, mock_ejs):
+    async def test_scroll_ejecuta_n_pasos(self, mock_ejs, mock_sleep):
         cdp = AsyncMock(spec=CDPSession)
-        await aplicar_zoom(cdp)
-        mock_ejs.assert_called_once()
-        assert "0.33" in mock_ejs.call_args[0][1]
+        await scroll_humano(cdp, pasos=3)
+        assert mock_ejs.call_count == 3
+        for call_args in mock_ejs.call_args_list:
+            js_code = call_args[0][1]
+            assert "scrollBy" in js_code
+            assert "smooth" in js_code
+
+    @pytest.mark.asyncio
+    @patch("cita_bot.asyncio.sleep", new_callable=AsyncMock)
+    @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
+    async def test_scroll_pasos_default(self, mock_ejs, mock_sleep):
+        cdp = AsyncMock(spec=CDPSession)
+        await scroll_humano(cdp)
+        assert mock_ejs.call_count == 3  # default pasos=3
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +71,7 @@ class TestAplicarZoom:
 
 class TestNavegar:
     @pytest.mark.asyncio
-    @patch("cita_bot.aplicar_zoom", new_callable=AsyncMock)
-    async def test_navegar_envia_comandos_correctos(self, mock_zoom):
+    async def test_navegar_envia_comandos_correctos(self):
         cdp = AsyncMock(spec=CDPSession)
         cdp.pre_wait_event.return_value = asyncio.Future()
         cdp.pre_wait_event.return_value.set_result({"method": "Page.loadEventFired"})
@@ -72,7 +83,6 @@ class TestNavegar:
         calls = cdp.send.call_args_list
         assert any("Page.enable" in str(c) for c in calls)
         assert any("Page.navigate" in str(c) for c in calls)
-        mock_zoom.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +91,8 @@ class TestNavegar:
 
 class TestClickYEsperarCarga:
     @pytest.mark.asyncio
-    @patch("cita_bot.aplicar_zoom", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_click_y_carga_normal(self, mock_ejs, mock_zoom):
+    async def test_click_y_carga_normal(self, mock_ejs):
         cdp = AsyncMock(spec=CDPSession)
         load_fut = asyncio.Future()
         load_fut.set_result({"method": "Page.loadEventFired"})
@@ -92,12 +101,10 @@ class TestClickYEsperarCarga:
 
         await click_y_esperar_carga(cdp, "document.getElementById('btn').click();")
         mock_ejs.assert_called_once()
-        mock_zoom.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("cita_bot.aplicar_zoom", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
-    async def test_click_timeout_continua(self, mock_ejs, mock_zoom):
+    async def test_click_timeout_continua(self, mock_ejs):
         """Si wait_future da timeout, continúa sin error."""
         cdp = AsyncMock(spec=CDPSession)
         load_fut = asyncio.Future()
@@ -106,7 +113,6 @@ class TestClickYEsperarCarga:
 
         await click_y_esperar_carga(cdp, "btn.click();")
         # No lanza excepción
-        mock_zoom.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -144,15 +150,15 @@ class TestPasoFormulario1:
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
     @patch("cita_bot.delay", new_callable=AsyncMock)
-    async def test_formulario_1_selecciona_provincia(self, mock_delay, mock_ejs, mock_click, ids):
+    @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
+    async def test_formulario_1_selecciona_provincia(self, mock_scroll, mock_delay, mock_ejs, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_1(cdp, ids)
 
-        # Verifica que ejecutar_js se llamó con el dropdown y valor correctos
+        mock_scroll.assert_called_once()
         js_code = mock_ejs.call_args[0][1]
         assert "form" in js_code
         assert safe_js_string(ids["valor_madrid"]) in js_code
-        # Verifica click en botón aceptar
         click_js = mock_click.call_args[0][1]
         assert "btnAceptar" in click_js
 
@@ -166,10 +172,12 @@ class TestPasoFormulario2:
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.ejecutar_js", new_callable=AsyncMock)
     @patch("cita_bot.delay", new_callable=AsyncMock)
-    async def test_formulario_2_selecciona_tramite(self, mock_delay, mock_ejs, mock_click, ids):
+    @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
+    async def test_formulario_2_selecciona_tramite(self, mock_scroll, mock_delay, mock_ejs, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_2(cdp, ids)
 
+        mock_scroll.assert_called_once()
         js_code = mock_ejs.call_args[0][1]
         assert safe_js_string(ids["dropdown_tramite"]) in js_code
         assert "4112" in js_code
@@ -183,10 +191,12 @@ class TestPasoFormulario3:
     @pytest.mark.asyncio
     @patch("cita_bot.click_y_esperar_carga", new_callable=AsyncMock)
     @patch("cita_bot.delay", new_callable=AsyncMock)
-    async def test_formulario_3_click_entrar(self, mock_delay, mock_click, ids):
+    @patch("cita_bot.scroll_humano", new_callable=AsyncMock)
+    async def test_formulario_3_click_entrar(self, mock_scroll, mock_delay, mock_click, ids):
         cdp = AsyncMock(spec=CDPSession)
         await paso_formulario_3(cdp, ids)
 
+        mock_scroll.assert_called_once()
         click_js = mock_click.call_args[0][1]
         assert "btnEntrar" in click_js
 
