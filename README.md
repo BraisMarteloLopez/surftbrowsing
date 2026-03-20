@@ -1,6 +1,6 @@
 # AUTO WEBSURFT v2
 
-**Estado:** Fase 0 implementada y testeada. Fases 1-5 pendientes.
+**Estado:** Fases 0-1 implementadas y testeadas. Fases 2-4 pendientes.
 
 ---
 
@@ -10,7 +10,7 @@ Automatización del portal ICP via Chrome DevTools Protocol (CDP). Cada página 
 
 ```
 Fase 0 — Selección de provincia          [IMPLEMENTADA]
-Fase 1 — Selección de trámite            [PENDIENTE]
+Fase 1 — Selección de trámite            [IMPLEMENTADA]
 Fase 2 — Aviso informativo               [PENDIENTE]
 Fase 3 — Datos personales (NIE + nombre) [PENDIENTE]
 Fase 4 — Solicitud de cita + evaluación  [PENDIENTE]
@@ -23,20 +23,22 @@ Fase 4 — Solicitud de cita + evaluación  [PENDIENTE]
 ```
 surftbrowsing/
 ├── bot.py                    # Orquestador: ciclo principal, backoff, reconexión
-├── humano.py                 # Primitivas + fases (Personalidad, EstadoRaton, fase_0)
-├── cdp_core.py               # Capa CDP: CDPSession, ejecutar_js, esperar_elemento, detectar_waf
+├── humano.py                 # Primitivas + fases (Personalidad, EstadoRaton, fase_0, fase_1)
+├── cdp_core.py               # Capa CDP: CDPSession, ejecutar_js, esperar_elemento, detectar_waf, css_escape_id
 ├── config.json               # IDs de elementos HTML del portal
 ├── .env.example              # Plantilla con ~40 variables de timing configurables
 ├── .env                      # Config personal (no se sube al repo)
 ├── requirements.txt          # websockets, python-dotenv
 ├── requirements-dev.txt      # pytest, pytest-asyncio
 ├── specs/
-│   └── pagina_0_seleccion_sede.md  # Spec detallada de fase 0 (plantilla para futuras)
+│   ├── pagina_0_seleccion_sede.md  # Spec detallada de fase 0
+│   └── pagina_1_seleccion_tramite.md  # Spec detallada de fase 1
 ├── tests/
 │   ├── conftest.py           # MockWebSocket, fixtures compartidas
-│   ├── test_cdp_core.py      # 43 tests — CDPSession, ejecutar_js, esperar_elemento, WAF
+│   ├── test_cdp_core.py      # 47 tests — CDPSession, ejecutar_js, esperar_elemento, WAF, css_escape_id
 │   ├── test_humano.py        # 24 tests — primitivas (ratón, click, tecla, scroll)
 │   ├── test_fase_0.py        # 31 tests — flujo completo fase 0, robustez, edge cases
+│   ├── test_fase_1.py        # 28 tests — flujo completo fase 1, prefijo, CSS escaping
 │   ├── test_bot.py           # 18 tests — BackoffController, jitter, limpieza caché
 │   ├── old_conftest.py       # [REF] Fixtures v1
 │   └── old_test_*.py         # [REF] Tests v1
@@ -59,6 +61,7 @@ Capa CDP reutilizada de v1. WebSocket → navegador con `--remote-debugging-port
 | `esperar_carga_pagina(cdp)` | Espera `Page.loadEventFired` |
 | `detectar_waf(cdp)` | Detecta bloqueo WAF por texto en body |
 | `safe_js_string(s)` | Escapa strings para inyección segura en JS |
+| `css_escape_id(raw_id)` | Escapa IDs con caracteres especiales para CSS (`tramiteGrupo[0]` → `#tramiteGrupo\[0\]`) |
 
 ### `humano.py`
 Primitivas de bajo nivel + fases. Todos los tiempos vienen de `.env`.
@@ -86,7 +89,8 @@ Primitivas de bajo nivel + fases. Todos los tiempos vienen de `.env`.
 
 | Fase | Función | Pasos |
 |------|---------|-------|
-| 0 | `fase_0(cdp, pers, raton, primera_vez, config)` | Navegar → aterrizaje → abrir dropdown → buscar provincia → seleccionar → click Aceptar → esperar carga |
+| 0 | `fase_0(cdp, pers, raton, primera_vez, config)` | Navegar → aterrizaje → abrir dropdown → buscar provincia (exact match) → seleccionar → click Aceptar → esperar carga |
+| 1 | `fase_1(cdp, pers, raton, config)` | Aterrizaje + scroll obligatorio → abrir dropdown trámite → buscar trámite (prefix match) → seleccionar → click Aceptar → esperar carga |
 
 ### `bot.py`
 Orquestador principal. Ciclo infinito con personalidad nueva por iteración.
@@ -95,7 +99,7 @@ Orquestador principal. Ciclo infinito con personalidad nueva por iteración.
 |------------|-------------|
 | `BackoffController` | Backoff exponencial con umbral de alerta |
 | `limpiar_datos_navegador(cdp, origin)` | Limpia caché/storage sin tocar cookies |
-| `main()` | Ciclo: conectar → fase_0 → (fases pendientes) → limpiar → esperar |
+| `main()` | Ciclo: conectar → fase_0 → fase_1 → (fases pendientes) → limpiar → esperar |
 
 ---
 
@@ -109,7 +113,7 @@ NIE=Y1234567X
 NOMBRE=Juan García López
 
 # Depuración
-PASO_HASTA=0          # 0=solo fase 0, 5=todas las fases
+PASO_HASTA=1          # 0=solo fase 0, 1=hasta fase 1, 5=todas las fases
 
 # Timeouts
 TIMEOUT_CARGA_PAGINA_SEGUNDOS=15
@@ -131,11 +135,13 @@ IDs de elementos HTML del portal verificados:
 ```json
 {
   "url_inicio": "https://icp.administracionelectronica.gob.es/icpplus/index.html",
+  "tramite_prefijo": "POLICIA TARJETA CONFLICTO UKRANIA",
   "ids": {
     "dropdown_provincia": "form",
     "valor_madrid": "/icpplustiem/citar?p=28&locale=es",
     "boton_aceptar_f1": "btnAceptar",
     "dropdown_tramite": "tramiteGrupo[0]",
+    "valor_tramite": "4112",
     "boton_aceptar_f2": "btnAceptar",
     "boton_entrar_f3": "btnEntrar",
     "input_nie": "txtIdCitado",
@@ -146,7 +152,9 @@ IDs de elementos HTML del portal verificados:
 }
 ```
 
-La provincia objetivo es configurable: `config["provincia_objetivo"]` (default: "Madrid").
+Valores configurables en `config.json`:
+- `provincia_objetivo` — provincia a seleccionar en fase 0 (default: "Madrid")
+- `tramite_prefijo` — prefijo del trámite a buscar en fase 1 (match con `startsWith`)
 
 ---
 
@@ -163,8 +171,9 @@ cp .env.example .env
 # 3. Abrir navegador con CDP
 brave --remote-debugging-port=9222
 
-# 4. Ejecutar (solo fase 0 para probar)
-PASO_HASTA=0 python bot.py
+# 4. Ejecutar
+PASO_HASTA=0 python bot.py   # solo fase 0
+PASO_HASTA=1 python bot.py   # fases 0+1
 ```
 
 ---
@@ -175,13 +184,14 @@ PASO_HASTA=0 python bot.py
 # Instalar deps de desarrollo
 pip install -r requirements-dev.txt
 
-# Ejecutar todos (121 tests)
+# Ejecutar todos (148 tests)
 python -m pytest tests/ -v
 
 # Solo una suite
 python -m pytest tests/test_fase_0.py -v    # 31 tests
+python -m pytest tests/test_fase_1.py -v    # 28 tests
 python -m pytest tests/test_humano.py -v    # 24 tests
-python -m pytest tests/test_cdp_core.py -v  # 43 tests
+python -m pytest tests/test_cdp_core.py -v  # 47 tests
 python -m pytest tests/test_bot.py -v       # 18 tests
 ```
 
@@ -189,11 +199,11 @@ python -m pytest tests/test_bot.py -v       # 18 tests
 
 ## Pendiente
 
-- [ ] Fase 1 — Selección de trámite
+- [x] Fase 0 — Selección de provincia
+- [x] Fase 1 — Selección de trámite
 - [ ] Fase 2 — Aviso informativo (click "Entrar")
 - [ ] Fase 3 — Datos personales (NIE + nombre, escritura char-a-char)
 - [ ] Fase 4 — Solicitar cita + evaluación de resultado
-- [ ] Encadenar fases 0→4 en `bot.py`
 - [ ] Pruebas manuales contra el portal real con `PASO_HASTA` progresivo
 
 ---
