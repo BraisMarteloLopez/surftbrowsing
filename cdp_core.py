@@ -55,6 +55,15 @@ def safe_js_string(value: str) -> str:
     )
 
 
+def css_escape_id(raw_id: str) -> str:
+    """Escapa un ID para uso en selector CSS.
+
+    Ejemplo: 'tramiteGrupo[0]' → '#tramiteGrupo\\[0\\]'
+    """
+    escaped = raw_id.replace("[", "\\[").replace("]", "\\]")
+    return f"#{escaped}"
+
+
 # ---------------------------------------------------------------------------
 # CDP Session
 # ---------------------------------------------------------------------------

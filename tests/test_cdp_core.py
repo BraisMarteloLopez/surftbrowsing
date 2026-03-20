@@ -12,7 +12,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cdp_core import (
-    CDPSession, ejecutar_js, safe_js_string, obtener_ws_url,
+    CDPSession, ejecutar_js, safe_js_string, css_escape_id, obtener_ws_url,
     esperar_elemento, esperar_carga_pagina, detectar_waf,
     WafBanError, ElementoNoEncontrado, TimeoutCargaPagina,
     log_info, TIMEOUT_JS,
@@ -55,6 +55,24 @@ class TestSafeJsString:
     def test_selector_css_con_corchetes(self):
         # Los corchetes no se escapan — solo los caracteres peligrosos para JS strings
         assert safe_js_string("tramiteGrupo[0]") == "tramiteGrupo[0]"
+
+
+# =========================================================================
+# css_escape_id
+# =========================================================================
+
+class TestCssEscapeId:
+    def test_id_simple(self):
+        assert css_escape_id("form") == "#form"
+
+    def test_id_con_corchetes(self):
+        assert css_escape_id("tramiteGrupo[0]") == "#tramiteGrupo\\[0\\]"
+
+    def test_id_multiples_corchetes(self):
+        assert css_escape_id("a[0][1]") == "#a\\[0\\]\\[1\\]"
+
+    def test_id_sin_caracteres_especiales(self):
+        assert css_escape_id("btnAceptar") == "#btnAceptar"
 
 
 # =========================================================================

@@ -1,5 +1,6 @@
 {
     "url_inicio": "https://icp.administracionelectronica.gob.es/icpplus/index.html",
+    "tramite_prefijo": "POLICIA TARJETA CONFLICTO UKRANIA",
     "ids": {
         "dropdown_provincia": "form",
         "valor_madrid": "/icpplustiem/citar?p=28&locale=es",
