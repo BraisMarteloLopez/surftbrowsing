@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 from cdp_core import (
     CDPSession, ejecutar_js, obtener_ws_url, esperar_elemento,
     WafBanError, ElementoNoEncontrado, TimeoutCargaPagina,
-    detectar_waf, log_info, safe_js_string,
+    detectar_waf, log_info,
     TIMEOUT_PAGINA, TIMEOUT_JS,
 )
 from humano import (
@@ -75,15 +75,12 @@ class BackoffController:
         self.max_intervalo = max_intervalo
         self.umbral_alerta = umbral_alerta
         self._errores_consecutivos = 0
-        self._tipo_ultimo_error: str | None = None
 
     def registrar_exito(self) -> None:
         self._errores_consecutivos = 0
-        self._tipo_ultimo_error = None
 
     def registrar_error(self, tipo: str) -> float:
         self._errores_consecutivos += 1
-        self._tipo_ultimo_error = tipo
         return min(
             self.intervalo_base * (2 ** (self._errores_consecutivos - 1)),
             self.max_intervalo,

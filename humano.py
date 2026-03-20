@@ -268,13 +268,13 @@ async def _scroll_exploratorio(cdp: CDPSession, raton: EstadoRaton,
             pass
 
         if i < pasos - 1:
-            raton.x += random.randint(-5, 5)
-            raton.y += random.randint(-3, 3)
+            raton.x = max(0, raton.x + random.randint(-5, 5))
+            raton.y = max(0, raton.y + random.randint(-3, 3))
             try:
                 await cdp.send("Input.dispatchMouseEvent", {
                     "type": "mouseMoved",
-                    "x": max(0, raton.x),
-                    "y": max(0, raton.y),
+                    "x": raton.x,
+                    "y": raton.y,
                 }, timeout=TIMEOUT_JS)
             except Exception:
                 pass
@@ -309,12 +309,19 @@ async def _movimientos_idle_durante_espera(cdp: CDPSession, raton: EstadoRaton,
 async def fase_0(cdp: CDPSession, personalidad: Personalidad,
                  raton: EstadoRaton, es_primera_vez: bool,
                  config: dict) -> None:
-    """Página 0: Seleccionar provincia Madrid y pulsar Aceptar.
+    """Página 0: Seleccionar provincia y pulsar Aceptar.
 
     Sigue la especificación de specs/pagina_0_seleccion_sede.md.
+    Todos los selectores vienen de config["ids"], nada hardcodeado.
     """
     url_inicio = config["url_inicio"]
     ids = config["ids"]
+
+    # Selectores derivados de config
+    sel_dropdown = f"#{ids['dropdown_provincia']}"
+    sel_boton = f"#{ids['boton_aceptar_f1']}"
+    texto_provincia = config.get("provincia_objetivo", "Madrid")
+    valor_provincia = ids["valor_madrid"]
 
     # ── PASO 1: Navegación / Retorno ──────────────────────────────────────
     if es_primera_vez:
@@ -325,15 +332,20 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
         await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
     else:
         log_info("Fase 0: retorno al inicio (via botón de volver)")
-        # La carga ya fue triggereada por el botón de volver en el ciclo anterior.
-        # Solo esperamos a que el elemento clave esté disponible.
+        # Esperar a que la página cargue tras el click del botón de volver
+        try:
+            await esperar_carga_pagina(cdp, timeout=TIMEOUT_PAGINA)
+        except TimeoutCargaPagina:
+            # Puede que la carga ya haya ocurrido antes de que lleguemos aquí;
+            # no es crítico si el elemento clave aparece a continuación.
+            pass
 
     # Esperar elemento clave + verificar WAF
-    await esperar_elemento(cdp, "#form")
+    await esperar_elemento(cdp, sel_dropdown)
     if await detectar_waf(cdp):
         raise WafBanError("WAF detectado en Página 0")
 
-    log_info("Fase 0: página cargada, elemento #form encontrado")
+    log_info(f"Fase 0: página cargada, elemento {sel_dropdown} encontrado")
 
     # ── PASO 2: Aterrizaje (orientación visual) ──────────────────────────
     await asyncio.sleep(personalidad.delay(ATERRIZAJE_PAUSA_MIN, ATERRIZAJE_PAUSA_MAX))
@@ -355,18 +367,17 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
     await asyncio.sleep(personalidad.delay(PRE_INTERACCION_PAUSA_MIN,
                                            PRE_INTERACCION_PAUSA_MAX))
 
-    pos = await _mover_a_elemento(cdp, raton, "#form", personalidad)
+    pos = await _mover_a_elemento(cdp, raton, sel_dropdown, personalidad)
 
     # Re-verificar presencia antes de click
-    await esperar_elemento(cdp, "#form")
+    await esperar_elemento(cdp, sel_dropdown)
 
     # Click para dar focus al <select>
     await _click_nativo(cdp, pos["x"], pos["y"])
 
-    # Verificar que tiene focus
-    await ejecutar_js(cdp, """
-        document.querySelector('#form').focus();
-    """)
+    # Asegurar focus programáticamente como respaldo
+    dropdown_id_js = safe_js_string(ids["dropdown_provincia"])
+    await ejecutar_js(cdp, f"document.getElementById('{dropdown_id_js}').focus();")
 
     # ── PASO 4: Recorrido humano del desplegable ─────────────────────────
     await asyncio.sleep(personalidad.delay(DESPLEGABLE_PAUSA_APERTURA_MIN,
@@ -386,33 +397,37 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
             await asyncio.sleep(personalidad.delay(DESPLEGABLE_ITER_PAUSA_MIN,
                                                    DESPLEGABLE_ITER_PAUSA_MAX))
 
-    # 4c. Localizar "Madrid" recorriendo las opciones
-    options_result = await ejecutar_js(cdp, """
-        (function() {
-            var sel = document.querySelector('#form');
+    # 4c. Localizar la provincia objetivo recorriendo las opciones
+    options_result = await ejecutar_js(cdp, f"""
+        (function() {{
+            var sel = document.getElementById('{dropdown_id_js}');
+            if (!sel) return {{options: [], currentIndex: 0}};
             var opts = [];
-            for (var i = 0; i < sel.options.length; i++) {
-                opts.push({index: i, text: sel.options[i].textContent.trim()});
-            }
-            return {options: opts, currentIndex: sel.selectedIndex};
-        })();
+            for (var i = 0; i < sel.options.length; i++) {{
+                opts.push({{index: i, text: sel.options[i].textContent.trim()}});
+            }}
+            return {{options: opts, currentIndex: sel.selectedIndex}};
+        }})();
     """)
     options_data = options_result.get("value", {})
     options_list = options_data.get("options", [])
     current_index = options_data.get("currentIndex", 0)
 
-    # Encontrar índice de "Madrid"
-    madrid_index = None
+    # Encontrar índice de la provincia objetivo
+    target_index = None
     for opt in options_list:
-        if opt["text"] == "Madrid":
-            madrid_index = opt["index"]
+        if opt["text"] == texto_provincia:
+            target_index = opt["index"]
             break
 
-    if madrid_index is None:
-        raise ElementoNoEncontrado("Opción 'Madrid' no encontrada en el <select>")
+    if target_index is None:
+        raise ElementoNoEncontrado(
+            f"Opción '{texto_provincia}' no encontrada en el <select> "
+            f"(opciones: {[o['text'] for o in options_list[:10]]})"
+        )
 
-    # Navegar desde la posición actual hasta Madrid con ArrowDown/ArrowUp
-    pasos_necesarios = madrid_index - current_index
+    # Navegar desde la posición actual hasta la provincia con ArrowDown/ArrowUp
+    pasos_necesarios = target_index - current_index
     tecla = "ArrowDown" if pasos_necesarios > 0 else "ArrowUp"
 
     for _ in range(abs(pasos_necesarios)):
@@ -420,7 +435,7 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
         await asyncio.sleep(personalidad.delay(DESPLEGABLE_NAV_DELAY_MIN,
                                                DESPLEGABLE_NAV_DELAY_MAX))
 
-    # 4d. Seleccionar "Madrid" — pausa de decisión
+    # 4d. Seleccionar — pausa de decisión
     await asyncio.sleep(personalidad.delay(DESPLEGABLE_DECISION_MIN,
                                            DESPLEGABLE_DECISION_MAX))
 
@@ -428,48 +443,50 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
     await _enviar_tecla(cdp, "Enter")
 
     # Dispatchar eventos change/input para que el formulario reaccione
-    await ejecutar_js(cdp, """
-        (function() {
-            var sel = document.querySelector('#form');
-            sel.dispatchEvent(new Event('change', {bubbles: true}));
-            sel.dispatchEvent(new Event('input', {bubbles: true}));
-        })();
+    await ejecutar_js(cdp, f"""
+        (function() {{
+            var sel = document.getElementById('{dropdown_id_js}');
+            sel.dispatchEvent(new Event('change', {{bubbles: true}}));
+            sel.dispatchEvent(new Event('input', {{bubbles: true}}));
+        }})();
     """)
 
     # Verificación obligatoria
-    verify = await ejecutar_js(cdp, """
-        (function() {
-            var sel = document.querySelector('#form');
+    verify = await ejecutar_js(cdp, f"""
+        (function() {{
+            var sel = document.getElementById('{dropdown_id_js}');
             var opt = sel.options[sel.selectedIndex];
             return opt ? opt.textContent.trim() : '';
-        })();
+        }})();
     """)
     selected_text = verify.get("value", "")
 
-    if selected_text != "Madrid":
+    if selected_text != texto_provincia:
         # Reintento: forzar selección por valor como fallback
         log_info(f"Fase 0: verificación falló (seleccionado: '{selected_text}'), reintentando...")
-        valor_madrid = safe_js_string(ids["valor_madrid"])
+        valor_escaped = safe_js_string(valor_provincia)
         await ejecutar_js(cdp, f"""
             (function() {{
-                var sel = document.querySelector('#form');
-                sel.value = '{valor_madrid}';
+                var sel = document.getElementById('{dropdown_id_js}');
+                sel.value = '{valor_escaped}';
                 sel.dispatchEvent(new Event('change', {{bubbles: true}}));
                 sel.dispatchEvent(new Event('input', {{bubbles: true}}));
             }})();
         """)
         # Segunda verificación
-        verify2 = await ejecutar_js(cdp, """
-            (function() {
-                var sel = document.querySelector('#form');
+        verify2 = await ejecutar_js(cdp, f"""
+            (function() {{
+                var sel = document.getElementById('{dropdown_id_js}');
                 var opt = sel.options[sel.selectedIndex];
                 return opt ? opt.textContent.trim() : '';
-            })();
+            }})();
         """)
-        if verify2.get("value", "") != "Madrid":
-            raise RuntimeError("No se pudo seleccionar 'Madrid' tras 2 intentos")
+        if verify2.get("value", "") != texto_provincia:
+            raise RuntimeError(
+                f"No se pudo seleccionar '{texto_provincia}' tras 2 intentos"
+            )
 
-    log_info("Fase 0: Madrid seleccionado correctamente")
+    log_info(f"Fase 0: {texto_provincia} seleccionado correctamente")
 
     # ── PASO 5: Transición hacia el botón ────────────────────────────────
     await asyncio.sleep(personalidad.delay(TRANSICION_PAUSA_MIN, TRANSICION_PAUSA_MAX))
@@ -484,10 +501,10 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
                                                TRANSICION_EXTRA_MAX))
 
     # ── PASO 6: Envío (click en "Aceptar") ───────────────────────────────
-    pos_btn = await _mover_a_elemento(cdp, raton, "#btnAceptar", personalidad)
+    pos_btn = await _mover_a_elemento(cdp, raton, sel_boton, personalidad)
 
     # Re-verificar presencia del botón
-    await esperar_elemento(cdp, "#btnAceptar")
+    await esperar_elemento(cdp, sel_boton)
 
     # Hesitación pre-click
     await asyncio.sleep(personalidad.delay(ENVIO_HESITACION_MIN, ENVIO_HESITACION_MAX))

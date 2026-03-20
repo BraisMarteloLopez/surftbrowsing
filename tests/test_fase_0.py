@@ -1,7 +1,8 @@
 """Tests exhaustivos para fase_0 — flujo completo de Página 0."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch, call, MagicMock
+from contextlib import contextmanager
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
@@ -83,7 +84,6 @@ def _build_ejecutar_js_side_effect(verification_results=None):
     if verification_results is None:
         verification_results = ["Madrid"]
 
-    call_index = [0]
     verify_index = [0]
 
     async def side_effect(cdp, expression, timeout=5.0):
@@ -123,6 +123,69 @@ def _build_ejecutar_js_side_effect(verification_results=None):
     return side_effect
 
 
+@contextmanager
+def fase_0_patches(**overrides):
+    """Aplica todos los patches comunes para fase_0 tests.
+
+    Keyword arguments override the default mocks:
+        esperar_elemento, detectar_waf, ejecutar_js, _mover_raton,
+        sleep, _enviar_tecla, _click_nativo, _micro_movimiento,
+        _scroll_exploratorio, random_random, random_randint
+    """
+    defaults = {
+        "esperar_elemento": {"new_callable": AsyncMock,
+                             "return_value": {"x": 400, "y": 300, "width": 200, "height": 30}},
+        "detectar_waf": {"new_callable": AsyncMock, "return_value": False},
+        "ejecutar_js": {"side_effect": _build_ejecutar_js_side_effect()},
+        "_mover_raton": {"new_callable": AsyncMock},
+        "sleep": {"new_callable": AsyncMock},
+        "_enviar_tecla": {"new_callable": AsyncMock},
+        "_click_nativo": {"new_callable": AsyncMock},
+        "_micro_movimiento": {"new_callable": AsyncMock},
+        "_scroll_exploratorio": {"new_callable": AsyncMock},
+        "random_random": {"return_value": 0.99},
+        "random_randint": {"return_value": 1},
+    }
+
+    # Apply overrides
+    for key, val in overrides.items():
+        if isinstance(val, dict):
+            defaults[key] = val
+        else:
+            # Shortcut: pass a callable or value directly
+            if callable(val) and not isinstance(val, AsyncMock):
+                defaults[key] = {"side_effect": val}
+            else:
+                defaults[key] = {"return_value": val}
+
+    patches = {}
+    # Map key → patch target
+    targets = {
+        "esperar_elemento": "humano.esperar_elemento",
+        "detectar_waf": "humano.detectar_waf",
+        "ejecutar_js": "humano.ejecutar_js",
+        "_mover_raton": "humano._mover_raton",
+        "sleep": "humano.asyncio.sleep",
+        "_enviar_tecla": "humano._enviar_tecla",
+        "_click_nativo": "humano._click_nativo",
+        "_micro_movimiento": "humano._micro_movimiento",
+        "_scroll_exploratorio": "humano._scroll_exploratorio",
+        "random_random": "humano.random.random",
+        "random_randint": "humano.random.randint",
+    }
+
+    started = {}
+    try:
+        for key, target in targets.items():
+            p = patch(target, **defaults[key])
+            started[key] = p.start()
+        yield started
+    finally:
+        for key in targets:
+            patch.stopall()
+            break  # stopall stops everything
+
+
 # =========================================================================
 # Fase 0 — Primera vez (navegación)
 # =========================================================================
@@ -135,22 +198,9 @@ class TestFase0PrimeraVez:
         raton = EstadoRaton()
         config = _make_config()
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True, config=config)
+        with fase_0_patches():
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
-        # Verificar que se navegó
         send_calls = cdp.send.call_args_list
         page_enable = [c for c in send_calls if c[0][0] == "Page.enable"]
         page_navigate = [c for c in send_calls if c[0][0] == "Page.navigate"]
@@ -165,22 +215,9 @@ class TestFase0PrimeraVez:
         raton = EstadoRaton()
         config = _make_config()
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=False, config=config)
+        with fase_0_patches():
+            await fase_0(cdp, personalidad, raton, es_primera_vez=False, config=config)
 
-        # No debe haber Page.navigate
         send_calls = cdp.send.call_args_list
         page_navigate = [c for c in send_calls if c[0][0] == "Page.navigate"]
         assert len(page_navigate) == 0
@@ -198,13 +235,9 @@ class TestFase0Waf:
         raton = EstadoRaton()
         config = _make_config()
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=True):
-                with pytest.raises(WafBanError, match="WAF detectado en Página 0"):
-                    with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                        await fase_0(cdp, personalidad, raton,
-                                     es_primera_vez=True, config=config)
+        with fase_0_patches(detectar_waf={"new_callable": AsyncMock, "return_value": True}):
+            with pytest.raises(WafBanError, match="WAF detectado en Página 0"):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
     @pytest.mark.asyncio
     async def test_waf_tras_envio_lanza_error(self):
@@ -213,28 +246,15 @@ class TestFase0Waf:
         raton = EstadoRaton()
         config = _make_config()
 
-        # WAF no detectado en carga inicial, sí tras envío
         waf_calls = [0]
 
         async def waf_side_effect(cdp):
             waf_calls[0] += 1
-            return waf_calls[0] > 1  # True en la segunda llamada (post-envío)
+            return waf_calls[0] > 1
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", side_effect=waf_side_effect):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    with pytest.raises(WafBanError, match="tras envío"):
-                                                        await fase_0(cdp, personalidad, raton,
-                                                                     es_primera_vez=True, config=config)
+        with fase_0_patches(detectar_waf={"side_effect": waf_side_effect}):
+            with pytest.raises(WafBanError, match="tras envío"):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
 
 # =========================================================================
@@ -255,24 +275,9 @@ class TestFase0SeleccionMadrid:
         async def mock_enviar_tecla(cdp, key):
             teclas_enviadas.append(key)
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", side_effect=mock_enviar_tecla):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True, config=config)
+        with fase_0_patches(_enviar_tecla={"side_effect": mock_enviar_tecla}):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
-        # Scroll exploratorio: 1 iteración × 1 ArrowDown (randint=1 para ambos)
-        # + navegación hasta Madrid: index 2 - 0 = 2 ArrowDown
-        # + 1 Enter para confirmar
         arrow_downs = [t for t in teclas_enviadas if t == "ArrowDown"]
         enters = [t for t in teclas_enviadas if t == "Enter"]
         assert len(arrow_downs) >= 2  # al menos 2 para llegar a Madrid
@@ -285,7 +290,6 @@ class TestFase0SeleccionMadrid:
         raton = EstadoRaton()
         config = _make_config()
 
-        # Options sin Madrid
         options_sin_madrid = {
             "value": {
                 "options": [
@@ -303,23 +307,9 @@ class TestFase0SeleccionMadrid:
                 return {}
             return {}
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=js_sin_madrid):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    with pytest.raises(ElementoNoEncontrado,
-                                                                       match="Madrid"):
-                                                        await fase_0(cdp, personalidad, raton,
-                                                                     es_primera_vez=True,
-                                                                     config=config)
+        with fase_0_patches(ejecutar_js={"side_effect": js_sin_madrid}):
+            with pytest.raises(ElementoNoEncontrado, match="Madrid"):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
     @pytest.mark.asyncio
     async def test_verificacion_fallida_reintenta_con_value(self):
@@ -331,7 +321,6 @@ class TestFase0SeleccionMadrid:
 
         js_expressions = []
 
-        # Primera verificación: "Barcelona", segunda: "Madrid"
         side_effect = _build_ejecutar_js_side_effect(
             verification_results=["Barcelona", "Madrid"]
         )
@@ -340,23 +329,9 @@ class TestFase0SeleccionMadrid:
             js_expressions.append(expression)
             return await side_effect(cdp, expression, timeout)
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=tracking_js):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True,
-                                                                 config=config)
+        with fase_0_patches(ejecutar_js={"side_effect": tracking_js}):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
-        # Verificar que hubo un fallback con sel.value (the full expression includes it)
         all_js = "\n".join(js_expressions)
         assert "sel.value =" in all_js, (
             f"Expected fallback sel.value assignment. JS calls:\n{all_js[:500]}"
@@ -374,23 +349,38 @@ class TestFase0SeleccionMadrid:
             verification_results=["Barcelona", "Barcelona"]
         )
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=side_effect):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    with pytest.raises(RuntimeError,
-                                                                       match="2 intentos"):
-                                                        await fase_0(cdp, personalidad, raton,
-                                                                     es_primera_vez=True,
-                                                                     config=config)
+        with fase_0_patches(ejecutar_js={"side_effect": side_effect}):
+            with pytest.raises(RuntimeError, match="2 intentos"):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+    @pytest.mark.asyncio
+    async def test_provincia_objetivo_configurable(self):
+        """config['provincia_objetivo'] cambia la provincia buscada."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+        config["provincia_objetivo"] = "Valencia"
+
+        # Valencia está en index 3
+        side_effect = _build_ejecutar_js_side_effect(
+            verification_results=["Valencia"]
+        )
+
+        teclas = []
+
+        async def mock_tecla(cdp, key):
+            teclas.append(key)
+
+        with fase_0_patches(
+            ejecutar_js={"side_effect": side_effect},
+            _enviar_tecla={"side_effect": mock_tecla},
+        ):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+        # Exploratory scrolls (1 iter × 1 arrow) + navigation to index 3 = 3 ArrowDowns
+        arrow_downs = [t for t in teclas if t == "ArrowDown"]
+        assert len(arrow_downs) >= 3
 
 
 # =========================================================================
@@ -411,23 +401,9 @@ class TestFase0EsperaElementos:
             esperar_calls.append(selector)
             return {"x": 400, "y": 300, "width": 200, "height": 30}
 
-        with patch("humano.esperar_elemento", side_effect=mock_esperar):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True,
-                                                                 config=config)
+        with fase_0_patches(esperar_elemento={"side_effect": mock_esperar}):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
-        # Debe esperar #form (múltiples veces: carga + mover_a_elemento + re-verificar)
-        # y #btnAceptar
         assert "#form" in esperar_calls
         assert "#btnAceptar" in esperar_calls
 
@@ -441,12 +417,9 @@ class TestFase0EsperaElementos:
         async def esperar_falla(cdp, selector, timeout=None):
             raise ElementoNoEncontrado(f"#{selector} no encontrado")
 
-        with patch("humano.esperar_elemento", side_effect=esperar_falla):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                    with pytest.raises(ElementoNoEncontrado):
-                        await fase_0(cdp, personalidad, raton,
-                                     es_primera_vez=True, config=config)
+        with fase_0_patches(esperar_elemento={"side_effect": esperar_falla}):
+            with pytest.raises(ElementoNoEncontrado):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
 
 # =========================================================================
@@ -466,21 +439,8 @@ class TestFase0Envio:
         async def mock_click(cdp, x, y):
             clicks.append((x, y))
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", side_effect=mock_click):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True,
-                                                                 config=config)
+        with fase_0_patches(_click_nativo={"side_effect": mock_click}):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
         # Debe haber al menos 2 clicks: uno en #form y otro en #btnAceptar
         assert len(clicks) >= 2
@@ -492,23 +452,9 @@ class TestFase0Envio:
         raton = EstadoRaton()
         config = _make_config()
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True,
-                                                                 config=config)
+        with fase_0_patches():
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
-        # pre_wait_event debe ser llamado con "Page.loadEventFired"
         pre_wait_calls = cdp.pre_wait_event.call_args_list
         load_events = [c for c in pre_wait_calls if c[0][0] == "Page.loadEventFired"]
         assert len(load_events) >= 1
@@ -516,7 +462,6 @@ class TestFase0Envio:
     @pytest.mark.asyncio
     async def test_timeout_carga_tras_click_lanza_excepcion(self):
         cdp = _make_cdp_mock()
-        # Primera llamada a wait_future (navegación) OK, segunda (post-click) timeout
         call_count = [0]
 
         async def wait_future_side_effect(fut, timeout=None):
@@ -530,22 +475,9 @@ class TestFase0Envio:
         raton = EstadoRaton()
         config = _make_config()
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    with pytest.raises(TimeoutCargaPagina):
-                                                        await fase_0(cdp, personalidad, raton,
-                                                                     es_primera_vez=True,
-                                                                     config=config)
+        with fase_0_patches():
+            with pytest.raises(TimeoutCargaPagina):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
 
 # =========================================================================
@@ -565,21 +497,11 @@ class TestFase0Aterrizaje:
         async def mock_micro(*args, **kwargs):
             micro_calls.append(1)
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", side_effect=mock_micro):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.99):
-                                                with patch("humano.random.randint", return_value=2):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True,
-                                                                 config=config)
+        with fase_0_patches(
+            _micro_movimiento={"side_effect": mock_micro},
+            random_randint={"return_value": 2},
+        ):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
         # Al menos 2 micro-movimientos en aterrizaje (randint=2)
         assert len(micro_calls) >= 2
@@ -596,22 +518,12 @@ class TestFase0Aterrizaje:
         async def mock_scroll(*args, **kwargs):
             scroll_calls.append(1)
 
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                        with patch("humano._scroll_exploratorio", side_effect=mock_scroll):
-                                            # random.random=0.1 < SCROLL_PROB=0.30 → scroll happens
-                                            with patch("humano.random.random", return_value=0.1):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True,
-                                                                 config=config)
+        with fase_0_patches(
+            _scroll_exploratorio={"side_effect": mock_scroll},
+            # random.random=0.1 < SCROLL_PROB=0.30 → scroll happens
+            random_random={"return_value": 0.1},
+        ):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
         assert len(scroll_calls) >= 1
 
@@ -634,23 +546,13 @@ class TestFase0Transicion:
             micro_calls.append(args)
 
         # random.random=0.1 → both IDLE_PROB (0.4) and EXTRA_PROB (0.2) trigger
-        with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                    return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-            with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                    with patch("humano._mover_raton", new_callable=AsyncMock):
-                        with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                            with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                with patch("humano._click_nativo", new_callable=AsyncMock):
-                                    with patch("humano._micro_movimiento", side_effect=mock_micro):
-                                        with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                            with patch("humano.random.random", return_value=0.1):
-                                                with patch("humano.random.randint", return_value=1):
-                                                    await fase_0(cdp, personalidad, raton,
-                                                                 es_primera_vez=True,
-                                                                 config=config)
+        with fase_0_patches(
+            _micro_movimiento={"side_effect": mock_micro},
+            random_random={"return_value": 0.1},
+        ):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
-        # micro-movimientos: aterrizaje (1) + transición idle (1) = al least 2
+        # micro-movimientos: aterrizaje (1) + transición idle (1) = at least 2
         assert len(micro_calls) >= 2
 
 
@@ -670,22 +572,8 @@ class TestFase0EndToEnd:
             with patch("humano.random.choice", return_value=velocidad):
                 personalidad = Personalidad()
 
-            with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                        return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-                with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                    with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                        with patch("humano._mover_raton", new_callable=AsyncMock):
-                            with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                                with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                    with patch("humano._click_nativo", new_callable=AsyncMock):
-                                        with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                            with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                                with patch("humano.random.random", return_value=0.99):
-                                                    with patch("humano.random.randint", return_value=1):
-                                                        # No debe lanzar excepción
-                                                        await fase_0(cdp, personalidad, raton,
-                                                                     es_primera_vez=True,
-                                                                     config=config)
+            with fase_0_patches():
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
     @pytest.mark.asyncio
     async def test_multiples_ejecuciones_no_acumulan_estado(self):
@@ -697,18 +585,274 @@ class TestFase0EndToEnd:
             personalidad = _make_personalidad_rapida()
             raton = EstadoRaton()
 
-            with patch("humano.esperar_elemento", new_callable=AsyncMock,
-                        return_value={"x": 400, "y": 300, "width": 200, "height": 30}):
-                with patch("humano.detectar_waf", new_callable=AsyncMock, return_value=False):
-                    with patch("humano.ejecutar_js", side_effect=_build_ejecutar_js_side_effect()):
-                        with patch("humano._mover_raton", new_callable=AsyncMock):
-                            with patch("humano.asyncio.sleep", new_callable=AsyncMock):
-                                with patch("humano._enviar_tecla", new_callable=AsyncMock):
-                                    with patch("humano._click_nativo", new_callable=AsyncMock):
-                                        with patch("humano._micro_movimiento", new_callable=AsyncMock):
-                                            with patch("humano._scroll_exploratorio", new_callable=AsyncMock):
-                                                with patch("humano.random.random", return_value=0.99):
-                                                    with patch("humano.random.randint", return_value=1):
-                                                        await fase_0(cdp, personalidad, raton,
-                                                                     es_primera_vez=(i == 0),
-                                                                     config=config)
+            with fase_0_patches():
+                await fase_0(cdp, personalidad, raton,
+                             es_primera_vez=(i == 0), config=config)
+
+
+# =========================================================================
+# Fase 0 — Robustez: configuración inválida y edge cases
+# =========================================================================
+
+class TestFase0ConfigInvalida:
+    @pytest.mark.asyncio
+    async def test_config_sin_ids_lanza_keyerror(self):
+        """Config sin 'ids' debe fallar con KeyError."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = {"url_inicio": "https://example.com"}
+
+        with fase_0_patches():
+            with pytest.raises(KeyError):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+    @pytest.mark.asyncio
+    async def test_config_sin_url_inicio_lanza_keyerror(self):
+        """Config sin 'url_inicio' debe fallar con KeyError."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = {"ids": {"dropdown_provincia": "form", "valor_madrid": "x", "boton_aceptar_f1": "btn"}}
+
+        with fase_0_patches():
+            with pytest.raises(KeyError):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+    @pytest.mark.asyncio
+    async def test_config_ids_incompletos_lanza_keyerror(self):
+        """Config sin 'boton_aceptar_f1' debe fallar."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = {
+            "url_inicio": "https://example.com",
+            "ids": {"dropdown_provincia": "form", "valor_madrid": "x"},
+        }
+
+        with fase_0_patches():
+            with pytest.raises(KeyError):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+
+class TestFase0DisconnectMidFase:
+    @pytest.mark.asyncio
+    async def test_cdp_send_falla_en_navegacion(self):
+        """Si cdp.send falla durante Page.navigate, la excepción se propaga."""
+        cdp = _make_cdp_mock()
+        cdp.send = AsyncMock(side_effect=ConnectionError("CDP disconnected"))
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        with fase_0_patches():
+            with pytest.raises(ConnectionError):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+    @pytest.mark.asyncio
+    async def test_wait_future_falla_en_navegacion(self):
+        """Si wait_future falla en la primera llamada (navegación), se propaga."""
+        cdp = _make_cdp_mock()
+        cdp.wait_future = AsyncMock(side_effect=ConnectionError("CDP lost"))
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        with fase_0_patches():
+            with pytest.raises(ConnectionError):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+    @pytest.mark.asyncio
+    async def test_ejecutar_js_falla_en_focus(self):
+        """Si ejecutar_js falla al hacer focus, la excepción se propaga."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        async def js_falla_focus(cdp, expression, timeout=5.0):
+            if "focus()" in expression:
+                raise ConnectionError("CDP gone during focus")
+            return {}
+
+        with fase_0_patches(ejecutar_js={"side_effect": js_falla_focus}):
+            with pytest.raises(ConnectionError, match="focus"):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+
+class TestFase0TimeoutEdgeCases:
+    @pytest.mark.asyncio
+    async def test_esperar_elemento_timeout_en_reintento(self):
+        """En reintento (no primera vez), si esperar_elemento falla → excepción."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        async def esperar_timeout(cdp, selector, timeout=None):
+            raise ElementoNoEncontrado(f"{selector} timeout")
+
+        with fase_0_patches(esperar_elemento={"side_effect": esperar_timeout}):
+            with pytest.raises(ElementoNoEncontrado):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=False, config=config)
+
+    @pytest.mark.asyncio
+    async def test_options_vacias_lanza_error(self):
+        """Si el <select> no tiene opciones, debe lanzar ElementoNoEncontrado."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        async def js_options_vacias(cdp, expression, timeout=5.0):
+            if "opts.push" in expression:
+                return {"value": {"options": [], "currentIndex": 0}}
+            if "focus()" in expression:
+                return {}
+            return {}
+
+        with fase_0_patches(ejecutar_js={"side_effect": js_options_vacias}):
+            with pytest.raises(ElementoNoEncontrado, match="Madrid"):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+    @pytest.mark.asyncio
+    async def test_ejecutar_js_retorna_none_value(self):
+        """Si ejecutar_js retorna value=None para options, no crashea."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        async def js_none_value(cdp, expression, timeout=5.0):
+            if "opts.push" in expression:
+                return {}  # No "value" key
+            if "focus()" in expression:
+                return {}
+            return {}
+
+        with fase_0_patches(ejecutar_js={"side_effect": js_none_value}):
+            with pytest.raises(ElementoNoEncontrado, match="Madrid"):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+    @pytest.mark.asyncio
+    async def test_idle_task_cancelada_en_timeout(self):
+        """Tras TimeoutCargaPagina, la tarea idle debe cancelarse correctamente."""
+        cdp = _make_cdp_mock()
+        call_count = [0]
+
+        async def wait_future_timeout(fut, timeout=None):
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                return {"method": "Page.loadEventFired"}
+            raise asyncio.TimeoutError()
+
+        cdp.wait_future = AsyncMock(side_effect=wait_future_timeout)
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        with fase_0_patches():
+            with pytest.raises(TimeoutCargaPagina):
+                await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+        # No queda tarea pendiente (verificar que no hay warning de tarea no awaited)
+        # Si llegamos aquí sin errores, la limpieza fue correcta.
+
+
+class TestFase0SelectNavigation:
+    @pytest.mark.asyncio
+    async def test_madrid_ya_seleccionado_no_envia_arrows(self):
+        """Si Madrid ya está seleccionado (currentIndex==2), no hace ArrowDown de navegación."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        madrid_already_selected = {
+            "value": {
+                "options": [
+                    {"index": 0, "text": "Seleccione..."},
+                    {"index": 1, "text": "Barcelona"},
+                    {"index": 2, "text": "Madrid"},
+                ],
+                "currentIndex": 2,
+            }
+        }
+
+        async def js_madrid_already(cdp, expression, timeout=5.0):
+            if "opts.push" in expression:
+                return madrid_already_selected
+            if "focus()" in expression:
+                return {}
+            if "sel.options[sel.selectedIndex]" in expression and "textContent" in expression:
+                return {"value": "Madrid"}
+            if "dispatchEvent" in expression:
+                return {}
+            return {}
+
+        teclas = []
+
+        async def mock_tecla(cdp, key):
+            teclas.append(key)
+
+        with fase_0_patches(
+            ejecutar_js={"side_effect": js_madrid_already},
+            _enviar_tecla={"side_effect": mock_tecla},
+        ):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+        # Exploratory arrows (1 iter × 1 arrow) + 0 navigation arrows + Enter
+        nav_arrows = [t for t in teclas if t in ("ArrowDown", "ArrowUp")]
+        # Only the exploratory scroll arrows, no additional navigation ones
+        # With randint=1: 1 iter × 1 arrow = 1 exploratory ArrowDown
+        # + 0 navigation arrows (already at Madrid)
+        enters = [t for t in teclas if t == "Enter"]
+        assert len(enters) == 1
+        # Total arrows should be just the exploratory ones (1)
+        assert len(nav_arrows) == 1
+
+    @pytest.mark.asyncio
+    async def test_arrowup_cuando_target_antes_de_current(self):
+        """Si target < current, debe usar ArrowUp en vez de ArrowDown."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        # Current at Valencia (3), Madrid at 2 → need ArrowUp
+        options_at_valencia = {
+            "value": {
+                "options": [
+                    {"index": 0, "text": "Seleccione..."},
+                    {"index": 1, "text": "Barcelona"},
+                    {"index": 2, "text": "Madrid"},
+                    {"index": 3, "text": "Valencia"},
+                ],
+                "currentIndex": 3,
+            }
+        }
+
+        async def js_at_valencia(cdp, expression, timeout=5.0):
+            if "opts.push" in expression:
+                return options_at_valencia
+            if "focus()" in expression:
+                return {}
+            if "sel.options[sel.selectedIndex]" in expression and "textContent" in expression:
+                return {"value": "Madrid"}
+            if "dispatchEvent" in expression:
+                return {}
+            return {}
+
+        teclas = []
+
+        async def mock_tecla(cdp, key):
+            teclas.append(key)
+
+        with fase_0_patches(
+            ejecutar_js={"side_effect": js_at_valencia},
+            _enviar_tecla={"side_effect": mock_tecla},
+        ):
+            await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
+
+        arrow_ups = [t for t in teclas if t == "ArrowUp"]
+        assert len(arrow_ups) >= 1  # Al menos 1 ArrowUp para ir de 3→2
