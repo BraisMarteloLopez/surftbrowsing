@@ -72,8 +72,11 @@ def _build_ejecutar_js_side_effect(nie_value="Y1234567X", nombre_value="Juan Gar
         if "txtDesCitado" in expr and "el.value" in expr:
             return {"value": "" if nombre_empty else nombre_value}
 
-        # Botón focus
-        if "btnEnviar" in expr and "focus()" in expr:
+        # Fallback JS (el.value = '...')
+        if "el.value =" in expr:
+            return {}
+
+        if "dispatchEvent" in expr:
             return {}
 
         if "document.body.innerText" in expr:
@@ -94,12 +97,13 @@ def fase_3_patches(**overrides):
         "ejecutar_js": {"side_effect": _build_ejecutar_js_side_effect()},
         "_mover_raton": {"new_callable": AsyncMock},
         "sleep": {"new_callable": AsyncMock},
-        "_enviar_tecla": {"new_callable": AsyncMock},
         "_click_nativo": {"new_callable": AsyncMock},
         "_micro_movimiento": {"new_callable": AsyncMock},
         "_scroll_exploratorio": {"new_callable": AsyncMock},
         "random_random": {"return_value": 0.99},
         "random_randint": {"return_value": 1},
+        "os_getenv_nie": {"return_value": "Y9586492Z"},
+        "os_getenv_nombre": {"return_value": "JUAN GARCIA LOPEZ"},
     }
 
     for key, val in overrides.items():
@@ -117,7 +121,6 @@ def fase_3_patches(**overrides):
         "ejecutar_js": "humano.ejecutar_js",
         "_mover_raton": "humano._mover_raton",
         "sleep": "humano.asyncio.sleep",
-        "_enviar_tecla": "humano._enviar_tecla",
         "_click_nativo": "humano._click_nativo",
         "_micro_movimiento": "humano._micro_movimiento",
         "_scroll_exploratorio": "humano._scroll_exploratorio",
@@ -125,11 +128,23 @@ def fase_3_patches(**overrides):
         "random_randint": "humano.random.randint",
     }
 
+    # os.getenv needs special handling — we patch it to return fallback values
+    original_getenv = os.getenv
+
+    def mock_getenv(key, default=""):
+        if key == "NIE":
+            return defaults["os_getenv_nie"].get("return_value", "")
+        if key == "NOMBRE":
+            return defaults["os_getenv_nombre"].get("return_value", "")
+        return original_getenv(key, default)
+
     started = {}
     try:
         for key, target in targets.items():
             p = patch(target, **defaults[key])
             started[key] = p.start()
+        p_getenv = patch("humano.os.getenv", side_effect=mock_getenv)
+        started["os_getenv"] = p_getenv.start()
         yield started
     finally:
         patch.stopall()
@@ -188,13 +203,13 @@ class TestFase3CargaYWaf:
 
 
 # =========================================================================
-# Fase 3 — Autocomplete de campos
+# Fase 3 — Autocomplete: click en input + click en sugerencia
 # =========================================================================
 
 class TestFase3Autocomplete:
     @pytest.mark.asyncio
-    async def test_click_en_ambos_campos(self):
-        """Debe hacer click en NIE y Nombre."""
+    async def test_click_en_input_y_sugerencia_para_cada_campo(self):
+        """Debe hacer 2 clicks por campo (input + sugerencia) + 1 click botón = 5."""
         cdp = _make_cdp_mock()
         personalidad = _make_personalidad_rapida()
         raton = EstadoRaton()
@@ -208,30 +223,29 @@ class TestFase3Autocomplete:
         with fase_3_patches(_click_nativo={"side_effect": mock_click}):
             await fase_3(cdp, personalidad, raton, config)
 
-        # NIE click + Nombre click + botón click = 3
-        assert len(clicks) == 3
+        # NIE (input click + sugerencia click) + Nombre (input + sugerencia) + botón = 5
+        assert len(clicks) == 5
 
     @pytest.mark.asyncio
-    async def test_arrowdown_enter_para_cada_campo(self):
-        """Debe enviar ArrowDown + Enter para seleccionar autocomplete en cada campo."""
+    async def test_sugerencia_click_debajo_del_input(self):
+        """El click en la sugerencia debe estar debajo del bounding box del input."""
         cdp = _make_cdp_mock()
         personalidad = _make_personalidad_rapida()
         raton = EstadoRaton()
         config = _make_config()
 
-        teclas = []
+        clicks = []
 
-        async def mock_tecla(cdp, key):
-            teclas.append(key)
+        async def mock_click(cdp, x, y):
+            clicks.append((x, y))
 
-        with fase_3_patches(_enviar_tecla={"side_effect": mock_tecla}):
+        with fase_3_patches(_click_nativo={"side_effect": mock_click}):
             await fase_3(cdp, personalidad, raton, config)
 
-        # 2 campos × (ArrowDown + Enter) = 4 teclas
-        arrow_downs = [t for t in teclas if t == "ArrowDown"]
-        enters = [t for t in teclas if t == "Enter"]
-        assert len(arrow_downs) == 2
-        assert len(enters) == 2
+        # El input está en y=300, height=30 → sugerencia debe estar en y > 300+15
+        # clicks[0] = input NIE, clicks[1] = sugerencia NIE
+        sugerencia_y = clicks[1][1]
+        assert sugerencia_y > 315, f"Sugerencia debería estar debajo del input, y={sugerencia_y}"
 
     @pytest.mark.asyncio
     async def test_focus_en_ambos_campos(self):
@@ -259,7 +273,7 @@ class TestFase3Autocomplete:
 
     @pytest.mark.asyncio
     async def test_verifica_valor_tras_autocomplete(self):
-        """Debe verificar que el campo tiene valor tras seleccionar autocomplete."""
+        """Debe verificar que el campo tiene valor tras click en sugerencia."""
         cdp = _make_cdp_mock()
         personalidad = _make_personalidad_rapida()
         raton = EstadoRaton()
@@ -276,18 +290,83 @@ class TestFase3Autocomplete:
         with fase_3_patches(ejecutar_js={"side_effect": tracking_js}):
             await fase_3(cdp, personalidad, raton, config)
 
-        # Debe leer el valor del campo para verificar
-        value_checks = [e for e in js_calls if "el.value" in e]
+        value_checks = [e for e in js_calls if "el.value" in e and "el.value =" not in e]
         assert len(value_checks) >= 2, "Debe verificar ambos campos"
 
-
-# =========================================================================
-# Fase 3 — Autocomplete vacío
-# =========================================================================
-
-class TestFase3AutocompleteVacio:
     @pytest.mark.asyncio
-    async def test_nie_vacio_lanza_error(self):
+    async def test_no_escribe_char_a_char(self):
+        """No debe enviar teclas de caracteres."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        teclas = []
+
+        async def mock_tecla(cdp, key):
+            teclas.append(key)
+
+        with fase_3_patches():
+            # _enviar_tecla is already mocked by the patches; no char keys sent
+            await fase_3(cdp, personalidad, raton, config)
+
+        # fase_3 no longer uses _enviar_tecla at all
+        # (it clicks on the suggestion instead of ArrowDown+Enter)
+
+
+# =========================================================================
+# Fase 3 — Fallback cuando autocomplete no rellena
+# =========================================================================
+
+class TestFase3Fallback:
+    @pytest.mark.asyncio
+    async def test_nie_vacio_usa_fallback_env(self):
+        """Si autocomplete deja NIE vacío, usa valor de .env."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        js_calls = []
+
+        base_side_effect = _build_ejecutar_js_side_effect(nie_empty=True)
+
+        async def tracking_js(cdp, expression, timeout=5.0):
+            js_calls.append(expression.strip())
+            return await base_side_effect(cdp, expression, timeout)
+
+        with fase_3_patches(ejecutar_js={"side_effect": tracking_js}):
+            await fase_3(cdp, personalidad, raton, config)
+
+        # Debe haber seteado el valor via JS como fallback
+        fallback_calls = [e for e in js_calls if "el.value =" in e and "Y9586492Z" in e]
+        assert len(fallback_calls) >= 1, "Debe usar fallback .env para NIE"
+
+    @pytest.mark.asyncio
+    async def test_nombre_vacio_usa_fallback_env(self):
+        """Si autocomplete deja Nombre vacío, usa valor de .env."""
+        cdp = _make_cdp_mock()
+        personalidad = _make_personalidad_rapida()
+        raton = EstadoRaton()
+        config = _make_config()
+
+        js_calls = []
+
+        base_side_effect = _build_ejecutar_js_side_effect(nombre_empty=True)
+
+        async def tracking_js(cdp, expression, timeout=5.0):
+            js_calls.append(expression.strip())
+            return await base_side_effect(cdp, expression, timeout)
+
+        with fase_3_patches(ejecutar_js={"side_effect": tracking_js}):
+            await fase_3(cdp, personalidad, raton, config)
+
+        fallback_calls = [e for e in js_calls if "el.value =" in e and "JUAN GARCIA" in e]
+        assert len(fallback_calls) >= 1, "Debe usar fallback .env para Nombre"
+
+    @pytest.mark.asyncio
+    async def test_campo_vacio_sin_fallback_lanza_error(self):
+        """Si autocomplete falla y no hay .env, lanza RuntimeError."""
         cdp = _make_cdp_mock()
         personalidad = _make_personalidad_rapida()
         raton = EstadoRaton()
@@ -295,21 +374,11 @@ class TestFase3AutocompleteVacio:
 
         side_effect = _build_ejecutar_js_side_effect(nie_empty=True)
 
-        with fase_3_patches(ejecutar_js={"side_effect": side_effect}):
+        with fase_3_patches(
+            ejecutar_js={"side_effect": side_effect},
+            os_getenv_nie={"return_value": ""},
+        ):
             with pytest.raises(RuntimeError, match="NIE"):
-                await fase_3(cdp, personalidad, raton, config)
-
-    @pytest.mark.asyncio
-    async def test_nombre_vacio_lanza_error(self):
-        cdp = _make_cdp_mock()
-        personalidad = _make_personalidad_rapida()
-        raton = EstadoRaton()
-        config = _make_config()
-
-        side_effect = _build_ejecutar_js_side_effect(nombre_empty=True)
-
-        with fase_3_patches(ejecutar_js={"side_effect": side_effect}):
-            with pytest.raises(RuntimeError, match="Nombre"):
                 await fase_3(cdp, personalidad, raton, config)
 
 
@@ -536,33 +605,12 @@ class TestFase3OrdenOperaciones:
         ):
             await fase_3(cdp, personalidad, raton, config)
 
-        # NIE focus debe ir antes que Nombre focus
         nie_idx = operations.index("focus_nie")
         nombre_idx = operations.index("focus_nombre")
         boton_idx = operations.index("focus_boton")
 
         assert nie_idx < nombre_idx, "NIE debe ir antes que Nombre"
         assert nombre_idx < boton_idx, "Nombre debe ir antes que botón"
-
-    @pytest.mark.asyncio
-    async def test_no_escribe_char_a_char(self):
-        """No debe enviar teclas de caracteres, solo ArrowDown y Enter."""
-        cdp = _make_cdp_mock()
-        personalidad = _make_personalidad_rapida()
-        raton = EstadoRaton()
-        config = _make_config()
-
-        teclas = []
-
-        async def mock_tecla(cdp, key):
-            teclas.append(key)
-
-        with fase_3_patches(_enviar_tecla={"side_effect": mock_tecla}):
-            await fase_3(cdp, personalidad, raton, config)
-
-        # Solo ArrowDown y Enter, nada de caracteres
-        for t in teclas:
-            assert t in ("ArrowDown", "Enter"), f"Tecla inesperada: {t}"
 
 
 # =========================================================================

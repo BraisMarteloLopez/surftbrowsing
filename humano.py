@@ -931,13 +931,18 @@ async def fase_2(cdp: CDPSession, personalidad: Personalidad,
 
 async def _rellenar_campo_autocomplete(cdp: CDPSession, personalidad: Personalidad,
                                         raton: EstadoRaton, selector: str,
-                                        campo_id: str, nombre_campo: str) -> None:
+                                        campo_id: str, nombre_campo: str,
+                                        valor_fallback: str = "") -> None:
     """Rellena un campo de texto usando el autocomplete del navegador.
 
     Simula el comportamiento humano: click en el input → esperar a que
-    aparezca el desplegable de autocomplete → ArrowDown → Enter.
+    aparezca el desplegable de autocomplete → click en la primera sugerencia.
+
+    El desplegable nativo del navegador aparece justo debajo del input.
+    Si el autocomplete no rellena el campo, usa valor_fallback via JS.
     """
-    # Mover al campo
+    # Mover al campo y obtener bounding box
+    box = await esperar_elemento(cdp, selector)
     pos = await _mover_a_elemento(cdp, raton, selector, personalidad)
 
     # Click para dar focus y abrir autocomplete
@@ -953,11 +958,20 @@ async def _rellenar_campo_autocomplete(cdp: CDPSession, personalidad: Personalid
     await asyncio.sleep(personalidad.delay(F3_AUTOCOMPLETE_ESPERA_MIN,
                                            F3_AUTOCOMPLETE_ESPERA_MAX))
 
-    # Seleccionar la primera (y única) sugerencia: ArrowDown + Enter
-    await _enviar_tecla(cdp, "ArrowDown")
+    # Click en la primera sugerencia del autocomplete (aparece justo debajo del input)
+    sugerencia_x = box["x"] + random.randint(-10, 10)
+    sugerencia_y = box["y"] + box["height"] // 2 + 20 + random.randint(0, 5)
+    await _mover_raton(cdp, raton, sugerencia_x, sugerencia_y,
+                       random.uniform(MOUSE_TRAYECTORIA_DURACION_MIN,
+                                      MOUSE_TRAYECTORIA_DURACION_MAX))
+
     await asyncio.sleep(personalidad.delay(F3_AUTOCOMPLETE_SELECCION_MIN,
                                            F3_AUTOCOMPLETE_SELECCION_MAX))
-    await _enviar_tecla(cdp, "Enter")
+
+    await _click_nativo(cdp, sugerencia_x, sugerencia_y)
+
+    # Breve espera para que el valor se propague
+    await asyncio.sleep(0.15)
 
     # Verificar que el campo se rellenó
     result = await ejecutar_js(cdp, f"""
@@ -968,29 +982,46 @@ async def _rellenar_campo_autocomplete(cdp: CDPSession, personalidad: Personalid
     """)
     valor = result.get("value", "")
 
-    if not valor:
-        log_info(f"Fase 3: AVISO — campo {nombre_campo} vacío tras autocomplete")
-        raise RuntimeError(
-            f"Campo '{nombre_campo}' vacío tras seleccionar autocomplete. "
-            f"Verificar que el navegador tiene datos guardados para este campo."
-        )
+    if valor:
+        log_info(f"Fase 3: campo {nombre_campo} rellenado via autocomplete — '{valor[:20]}...'")
+        return
 
-    log_info(f"Fase 3: campo {nombre_campo} rellenado — '{valor[:20]}...'")
+    # Fallback: rellenar via JS con el valor del .env
+    if valor_fallback:
+        log_info(f"Fase 3: autocomplete no rellenó {nombre_campo}, usando fallback .env")
+        valor_escaped = safe_js_string(valor_fallback)
+        await ejecutar_js(cdp, f"""
+            (function() {{
+                var el = document.getElementById('{campo_id_js}');
+                el.value = '{valor_escaped}';
+                el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                el.dispatchEvent(new Event('change', {{bubbles: true}}));
+            }})();
+        """)
+        log_info(f"Fase 3: campo {nombre_campo} rellenado via fallback — '{valor_fallback[:20]}...'")
+    else:
+        raise RuntimeError(
+            f"Campo '{nombre_campo}' vacío tras autocomplete y sin valor fallback en .env"
+        )
 
 
 async def fase_3(cdp: CDPSession, personalidad: Personalidad,
                  raton: EstadoRaton, config: dict) -> None:
     """Página 3: Rellenar NIE y nombre usando autocomplete del navegador.
 
-    No escribe char-a-char. El navegador tiene los datos guardados;
-    basta con click en el input → ArrowDown → Enter para seleccionar
-    la sugerencia del desplegable de autocomplete.
+    Click en el input → el navegador muestra sugerencias guardadas →
+    click en la primera sugerencia. Si el autocomplete nativo no funciona,
+    fallback con valores de .env (NIE, NOMBRE).
     """
     ids = config["ids"]
 
     sel_nie = f"#{ids['input_nie']}"
     sel_nombre = f"#{ids['input_nombre']}"
     sel_boton = f"#{ids['boton_aceptar_f4']}"
+
+    # Valores fallback desde .env (solo se usan si el autocomplete falla)
+    nie_fallback = os.getenv("NIE", "").strip()
+    nombre_fallback = os.getenv("NOMBRE", "").strip()
 
     # ── PASO 1: Espera de carga + seguridad ──────────────────────────────
     await esperar_elemento(cdp, sel_nie)
@@ -1014,7 +1045,8 @@ async def fase_3(cdp: CDPSession, personalidad: Personalidad,
                                            PRE_INTERACCION_PAUSA_MAX))
 
     await _rellenar_campo_autocomplete(
-        cdp, personalidad, raton, sel_nie, ids["input_nie"], "NIE"
+        cdp, personalidad, raton, sel_nie, ids["input_nie"], "NIE",
+        valor_fallback=nie_fallback,
     )
 
     # ── PASO 4: Pausa entre campos ───────────────────────────────────────
@@ -1022,7 +1054,8 @@ async def fase_3(cdp: CDPSession, personalidad: Personalidad,
 
     # ── PASO 5: Rellenar campo Nombre (autocomplete) ─────────────────────
     await _rellenar_campo_autocomplete(
-        cdp, personalidad, raton, sel_nombre, ids["input_nombre"], "Nombre"
+        cdp, personalidad, raton, sel_nombre, ids["input_nombre"], "Nombre",
+        valor_fallback=nombre_fallback,
     )
 
     # ── PASO 6: Transición hacia el botón ────────────────────────────────
