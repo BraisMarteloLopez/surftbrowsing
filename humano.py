@@ -1116,3 +1116,85 @@ async def fase_3(cdp: CDPSession, personalidad: Personalidad,
         raise WafBanError("WAF detectado tras envío de Página 3")
 
     log_info("Fase 3: completada — Página 4 cargada")
+
+
+# ---------------------------------------------------------------------------
+# FASE 4 — Solicitar cita (click en "Solicitar Cita")
+# ---------------------------------------------------------------------------
+
+async def fase_4(cdp: CDPSession, personalidad: Personalidad,
+                 raton: EstadoRaton, config: dict) -> None:
+    """Página 4: Pulsar "Solicitar Cita".
+
+    Página simple con un solo botón de acción.
+    """
+    ids = config["ids"]
+    sel_boton = f"#{ids['boton_solicitar_cita']}"
+
+    # ── PASO 1: Espera de carga + seguridad ──────────────────────────────
+    await esperar_elemento(cdp, sel_boton)
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF detectado en Página 4")
+
+    log_info(f"Fase 4: página cargada, botón {sel_boton} encontrado")
+
+    # ── PASO 2: Aterrizaje ───────────────────────────────────────────────
+    await asyncio.sleep(personalidad.delay(ATERRIZAJE_PAUSA_MIN, ATERRIZAJE_PAUSA_MAX))
+
+    n_movimientos = random.randint(ATERRIZAJE_MICRO_MOV_MIN, ATERRIZAJE_MICRO_MOV_MAX)
+    for _ in range(n_movimientos):
+        await _micro_movimiento(cdp, raton,
+                                ATERRIZAJE_MOV_RANGO_X, ATERRIZAJE_MOV_RANGO_Y,
+                                ATERRIZAJE_MOV_DURACION_MIN, ATERRIZAJE_MOV_DURACION_MAX)
+        await asyncio.sleep(random.uniform(0.1, 0.3))
+
+    # ── PASO 3: Focus + click en "Solicitar Cita" ────────────────────────
+    pos_btn = await _mover_a_elemento(cdp, raton, sel_boton, personalidad)
+
+    # Re-verificar presencia del botón
+    await esperar_elemento(cdp, sel_boton)
+
+    # Focus explícito en el botón
+    boton_f4_id_js = safe_js_string(ids["boton_solicitar_cita"])
+    await ejecutar_js(cdp, f"document.getElementById('{boton_f4_id_js}').focus();")
+
+    # Pausa entre focus y click (0.35–0.65s)
+    await asyncio.sleep(personalidad.delay(FOCUS_CLICK_MIN, FOCUS_CLICK_MAX))
+
+    # Pre-registrar evento de carga ANTES del click
+    load_fut = cdp.pre_wait_event("Page.loadEventFired")
+
+    # Click nativo
+    await _click_nativo(cdp, pos_btn["x"], pos_btn["y"])
+    log_info("Fase 4: click en Solicitar Cita, esperando carga...")
+
+    # ── PASO 4: Espera de carga ──────────────────────────────────────────
+    fin_carga = asyncio.Event()
+
+    tarea_idle = asyncio.create_task(
+        _movimientos_idle_durante_espera(cdp, raton, fin_carga)
+    )
+
+    try:
+        await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
+    except asyncio.TimeoutError:
+        fin_carga.set()
+        tarea_idle.cancel()
+        try:
+            await tarea_idle
+        except asyncio.CancelledError:
+            pass
+        raise TimeoutCargaPagina("Timeout esperando carga tras Solicitar Cita en Página 4")
+    finally:
+        fin_carga.set()
+        tarea_idle.cancel()
+        try:
+            await tarea_idle
+        except asyncio.CancelledError:
+            pass
+
+    # Verificar WAF tras carga
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF detectado tras envío de Página 4")
+
+    log_info("Fase 4: completada — página de resultado cargada")
