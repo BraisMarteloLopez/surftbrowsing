@@ -132,7 +132,8 @@ class TestLimpiarDatosNavegador:
         assert "icp.administracionelectronica.gob.es" in storage_calls[0][0][1]["origin"]
 
     @pytest.mark.asyncio
-    async def test_envia_network_clear_cache(self):
+    async def test_no_borra_cache_http(self):
+        """No debe llamar a Network.clearBrowserCache para evitar 429."""
         cdp = AsyncMock(spec=CDPSession)
         cdp.send = AsyncMock(return_value={})
 
@@ -140,8 +141,8 @@ class TestLimpiarDatosNavegador:
 
         calls = cdp.send.call_args_list
         methods = [c[0][0] for c in calls]
-        assert "Network.enable" in methods
-        assert "Network.clearBrowserCache" in methods
+        assert "Network.clearBrowserCache" not in methods
+        assert "Network.enable" not in methods
 
     @pytest.mark.asyncio
     async def test_no_crashea_si_storage_falla(self):
@@ -164,7 +165,7 @@ class TestLimpiarDatosNavegador:
         assert storage_calls[0][0][1]["origin"] == "https://example.com"
 
     @pytest.mark.asyncio
-    async def test_no_incluye_cookies(self):
+    async def test_solo_limpia_local_storage_y_websql(self):
         cdp = AsyncMock(spec=CDPSession)
         cdp.send = AsyncMock(return_value={})
 
@@ -174,3 +175,7 @@ class TestLimpiarDatosNavegador:
         storage_calls = [c for c in calls if c[0][0] == "Storage.clearDataForOrigin"]
         storage_types = storage_calls[0][0][1]["storageTypes"]
         assert "cookies" not in storage_types
+        assert "cache_storage" not in storage_types
+        assert "indexeddb" not in storage_types
+        assert "service_workers" not in storage_types
+        assert "local_storage" in storage_types

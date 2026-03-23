@@ -113,23 +113,22 @@ class BackoffController:
 # ---------------------------------------------------------------------------
 
 async def limpiar_datos_navegador(cdp: CDPSession, origin: str) -> None:
-    """Limpia caché HTTP y storage sin tocar cookies."""
+    """Limpia storage del formulario sin tocar cookies ni caché HTTP.
+
+    NO borramos la caché HTTP — un usuario real la mantiene caliente y
+    borrarla fuerza la re-descarga de todos los assets (CSS/JS/imágenes),
+    multiplicando las peticiones al servidor y disparando el rate limit 429.
+    """
     parsed = urlparse(origin)
     clean_origin = f"{parsed.scheme}://{parsed.netloc}"
-    storage_types = (
-        "appcache,cache_storage,indexeddb,"
-        "local_storage,service_workers,websql"
-    )
+    # Solo local_storage y websql (estado de formulario).
+    # Mantenemos cache_storage/service_workers/indexeddb/caché HTTP intactos.
+    storage_types = "local_storage,websql"
     try:
         await cdp.send("Storage.clearDataForOrigin", {
             "origin": clean_origin,
             "storageTypes": storage_types,
         }, timeout=TIMEOUT_JS)
-    except Exception:
-        pass
-    try:
-        await cdp.send("Network.enable", timeout=TIMEOUT_JS)
-        await cdp.send("Network.clearBrowserCache", timeout=TIMEOUT_JS)
     except Exception:
         pass
 
