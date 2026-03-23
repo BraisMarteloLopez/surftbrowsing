@@ -1,6 +1,6 @@
 # AUTO WEBSURFT v2
 
-**Estado:** Fases 0-3 implementadas y testeadas. Fase 4 pendiente.
+**Estado:** Todas las fases implementadas y testeadas (0-4 + evaluación de resultado).
 
 ---
 
@@ -13,7 +13,8 @@ Fase 0 — Selección de provincia          [IMPLEMENTADA]
 Fase 1 — Selección de trámite            [IMPLEMENTADA]
 Fase 2 — Aviso informativo               [IMPLEMENTADA]
 Fase 3 — Datos personales (NIE + nombre) [IMPLEMENTADA]
-Fase 4 — Solicitud de cita + evaluación  [PENDIENTE]
+Fase 4 — Solicitud de cita               [IMPLEMENTADA]
+Evaluación — Detectar citas disponibles  [IMPLEMENTADA]
 ```
 
 ---
@@ -41,6 +42,7 @@ surftbrowsing/
 │   ├── test_fase_1.py        # 28 tests — flujo completo fase 1, prefijo, CSS escaping
 │   ├── test_fase_2.py        # 21 tests — flujo completo fase 2, scroll exhaustivo
 │   ├── test_fase_3.py        # 23 tests — flujo completo fase 3, autocomplete
+│   ├── test_fase_4.py        # 13 tests — flujo completo fase 4, solicitar cita
 │   ├── test_bot.py           # 18 tests — BackoffController, jitter, limpieza caché
 │   ├── old_conftest.py       # [REF] Fixtures v1
 │   └── old_test_*.py         # [REF] Tests v1
@@ -96,6 +98,7 @@ Primitivas de bajo nivel + fases. Todos los tiempos vienen de `.env`.
 | 1 | `fase_1(cdp, pers, raton, config)` | Aterrizaje + scroll obligatorio → abrir dropdown trámite → buscar trámite (prefix match) → seleccionar → click Aceptar → esperar carga |
 | 2 | `fase_2(cdp, pers, raton, config)` | Aterrizaje → scroll exhaustivo hasta agotar contenido → focus + click "Entrar" → esperar carga |
 | 3 | `fase_3(cdp, pers, raton, config)` | Aterrizaje → autocomplete NIE (click → ArrowDown → Enter) → autocomplete Nombre → focus + click "Aceptar" → esperar carga |
+| 4 | `fase_4(cdp, pers, raton, config)` | Aterrizaje → focus + click "Solicitar Cita" → esperar carga |
 
 ### `bot.py`
 Orquestador principal. Ciclo infinito con personalidad nueva por iteración.
@@ -104,7 +107,10 @@ Orquestador principal. Ciclo infinito con personalidad nueva por iteración.
 |------------|-------------|
 | `BackoffController` | Backoff exponencial con umbral de alerta |
 | `limpiar_datos_navegador(cdp, origin)` | Limpia caché/storage sin tocar cookies |
-| `main()` | Ciclo: conectar → fase_0 → fase_1 → fase_2 → fase_3 → (fase 4 pendiente) → limpiar → esperar |
+| `evaluar_estado_pagina(cdp, ids)` | Multi-señal: contenido mínimo → texto "no hay citas" → URL válida → texto positivo |
+| `click_salir_nocita(cdp)` | Busca botón Salir/Aceptar y hace click para volver al inicio |
+| `alerta_sonora()` | Emite alerta sonora en bucle cuando hay citas |
+| `main()` | Ciclo: conectar → fases 0-4 → evaluar → alertar/reintentar → limpiar → esperar |
 
 ---
 
@@ -136,7 +142,7 @@ IDs de elementos HTML del portal verificados:
 ```json
 {
   "url_inicio": "https://icp.administracionelectronica.gob.es/icpplus/index.html",
-  "tramite_prefijo": "POLICIA TARJETA CONFLICTO UKRANIA",
+  "tramite_prefijo": "POLICÍA TARJETA CONFLICTO UCRANIA",
   "ids": {
     "dropdown_provincia": "form",
     "valor_madrid": "/icpplustiem/citar?p=28&locale=es",
@@ -148,7 +154,9 @@ IDs de elementos HTML del portal verificados:
     "input_nie": "txtIdCitado",
     "input_nombre": "txtDesCitado",
     "boton_aceptar_f4": "btnEnviar",
-    "boton_solicitar_cita": "btnEnviar"
+    "boton_solicitar_cita": "btnEnviar",
+    "texto_no_hay_citas": "En este momento no hay citas disponibles.",
+    "texto_hay_citas": ""
   }
 }
 ```
@@ -176,6 +184,7 @@ brave --remote-debugging-port=9222
 # 5. Ejecutar
 PASO_HASTA=0 python bot.py   # solo fase 0
 PASO_HASTA=3 python bot.py   # fases 0-3
+python bot.py                # ciclo completo (fases 0-4 + evaluación)
 ```
 
 ---
@@ -186,7 +195,7 @@ PASO_HASTA=3 python bot.py   # fases 0-3
 # Instalar deps de desarrollo
 pip install -r requirements-dev.txt
 
-# Ejecutar todos (192 tests)
+# Ejecutar todos (206 tests)
 python -m pytest tests/ -v
 
 # Solo una suite
@@ -194,6 +203,7 @@ python -m pytest tests/test_fase_0.py -v    # 31 tests
 python -m pytest tests/test_fase_1.py -v    # 28 tests
 python -m pytest tests/test_fase_2.py -v    # 21 tests
 python -m pytest tests/test_fase_3.py -v    # 23 tests
+python -m pytest tests/test_fase_4.py -v    # 13 tests
 python -m pytest tests/test_humano.py -v    # 24 tests
 python -m pytest tests/test_cdp_core.py -v  # 47 tests
 python -m pytest tests/test_bot.py -v       # 18 tests
@@ -207,7 +217,8 @@ python -m pytest tests/test_bot.py -v       # 18 tests
 - [x] Fase 1 — Selección de trámite
 - [x] Fase 2 — Aviso informativo (scroll exhaustivo + click "Entrar")
 - [x] Fase 3 — Datos personales (NIE + nombre via autocomplete del navegador)
-- [ ] Fase 4 — Solicitar cita + evaluación de resultado
+- [x] Fase 4 — Solicitar cita (focus + click)
+- [x] Evaluación de resultado (detectar "no hay citas", alertar si hay citas, reintentar)
 - [ ] Pruebas manuales contra el portal real con `PASO_HASTA` progresivo
 
 ---
