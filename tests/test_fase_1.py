@@ -92,12 +92,6 @@ def _build_ejecutar_js_side_effect(verification_results=None):
                 return {"value": verification_results[idx]}
             return {"value": "POLICIA TARJETA CONFLICTO UKRANIA - SOLICITUD"}
 
-        if "dispatchEvent" in expr and ("change" in expr or "input" in expr):
-            return {}
-
-        if "sel.value" in expr:
-            return {}
-
         if "document.body.innerText" in expr:
             return {"value": "Sede Electrónica"}
 
@@ -308,28 +302,30 @@ class TestFase1SeleccionTramite:
                 await fase_1(cdp, personalidad, raton, config)
 
     @pytest.mark.asyncio
-    async def test_verificacion_fallida_reintenta_con_value(self):
+    async def test_verificacion_fallida_reintenta_con_teclado(self):
         cdp = _make_cdp_mock()
         personalidad = _make_personalidad_rapida()
         raton = EstadoRaton()
         config = _make_config()
 
-        js_expressions = []
+        teclas_enviadas = []
 
         side_effect = _build_ejecutar_js_side_effect(
             verification_results=["POLICIA CNP - RECOGIDA",
                                   "POLICIA TARJETA CONFLICTO UKRANIA - SOLICITUD"]
         )
 
-        async def tracking_js(cdp, expression, timeout=5.0):
-            js_expressions.append(expression)
-            return await side_effect(cdp, expression, timeout)
+        async def tracking_tecla(cdp, key):
+            teclas_enviadas.append(key)
 
-        with fase_1_patches(ejecutar_js={"side_effect": tracking_js}):
+        with fase_1_patches(
+            ejecutar_js={"side_effect": side_effect},
+            _enviar_tecla={"side_effect": tracking_tecla},
+        ):
             await fase_1(cdp, personalidad, raton, config)
 
-        all_js = "\n".join(js_expressions)
-        assert "sel.value =" in all_js
+        # Should have used keyboard (ArrowDown/ArrowUp + Enter) for retry
+        assert "Enter" in teclas_enviadas
 
     @pytest.mark.asyncio
     async def test_verificacion_fallida_dos_veces_lanza_error(self):

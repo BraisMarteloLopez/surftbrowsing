@@ -344,7 +344,6 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
     # ── PASO 1: Navegación / Retorno ──────────────────────────────────────
     if es_primera_vez:
         log_info("Fase 0: navegando a URL de inicio")
-        await cdp.send("Page.enable", timeout=TIMEOUT_JS)
         load_fut = cdp.pre_wait_event("Page.loadEventFired")
         await cdp.send("Page.navigate", {"url": url_inicio}, timeout=TIMEOUT_PAGINA)
         await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
@@ -457,17 +456,9 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
     await asyncio.sleep(personalidad.delay(DESPLEGABLE_DECISION_MIN,
                                            DESPLEGABLE_DECISION_MAX))
 
-    # Confirmar selección con Enter (cierra el desplegable nativamente)
+    # Confirmar selección con Enter (cierra el desplegable nativamente y
+    # dispara el evento 'change' con isTrusted=true)
     await _enviar_tecla(cdp, "Enter")
-
-    # Dispatchar eventos change/input para que el formulario reaccione
-    await ejecutar_js(cdp, f"""
-        (function() {{
-            var sel = document.getElementById('{dropdown_id_js}');
-            sel.dispatchEvent(new Event('change', {{bubbles: true}}));
-            sel.dispatchEvent(new Event('input', {{bubbles: true}}));
-        }})();
-    """)
 
     # Verificación obligatoria
     verify = await ejecutar_js(cdp, f"""
@@ -480,17 +471,40 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
     selected_text = verify.get("value", "")
 
     if selected_text != texto_provincia:
-        # Reintento: forzar selección por valor como fallback
-        log_info(f"Fase 0: verificación falló (seleccionado: '{selected_text}'), reintentando...")
-        valor_escaped = safe_js_string(valor_provincia)
-        await ejecutar_js(cdp, f"""
+        # Reintento via teclado: re-focus, navegar de nuevo y confirmar con Enter
+        log_info(f"Fase 0: verificación falló (seleccionado: '{selected_text}'), reintentando via teclado...")
+        await ejecutar_js(cdp, f"document.getElementById('{dropdown_id_js}').focus();")
+        await asyncio.sleep(0.2)
+
+        # Obtener posición actual tras el intento fallido
+        retry_result = await ejecutar_js(cdp, f"""
             (function() {{
                 var sel = document.getElementById('{dropdown_id_js}');
-                sel.value = '{valor_escaped}';
-                sel.dispatchEvent(new Event('change', {{bubbles: true}}));
-                sel.dispatchEvent(new Event('input', {{bubbles: true}}));
+                var opts = [];
+                for (var i = 0; i < sel.options.length; i++) {{
+                    opts.push({{index: i, text: sel.options[i].textContent.trim()}});
+                }}
+                return {{currentIndex: sel.selectedIndex, options: opts}};
             }})();
         """)
+        retry_data = retry_result.get("value", {})
+        retry_current = retry_data.get("currentIndex", 0)
+        retry_opts = retry_data.get("options", [])
+
+        retry_target = None
+        for opt in retry_opts:
+            if opt["text"] == texto_provincia:
+                retry_target = opt["index"]
+                break
+
+        if retry_target is not None:
+            pasos = retry_target - retry_current
+            tecla_retry = "ArrowDown" if pasos > 0 else "ArrowUp"
+            for _ in range(abs(pasos)):
+                await _enviar_tecla(cdp, tecla_retry)
+                await asyncio.sleep(0.1)
+            await _enviar_tecla(cdp, "Enter")
+
         # Segunda verificación
         verify2 = await ejecutar_js(cdp, f"""
             (function() {{
@@ -689,17 +703,8 @@ async def fase_1(cdp: CDPSession, personalidad: Personalidad,
     await asyncio.sleep(personalidad.delay(DESPLEGABLE_DECISION_MIN,
                                            DESPLEGABLE_DECISION_MAX))
 
-    # Confirmar selección con Enter
+    # Confirmar selección con Enter (dispara 'change' nativo con isTrusted=true)
     await _enviar_tecla(cdp, "Enter")
-
-    # Dispatchar eventos change/input (el onchange dispara JS local, no AJAX)
-    await ejecutar_js(cdp, f"""
-        (function() {{
-            var sel = document.getElementById('{dropdown_id_js}');
-            sel.dispatchEvent(new Event('change', {{bubbles: true}}));
-            sel.dispatchEvent(new Event('input', {{bubbles: true}}));
-        }})();
-    """)
 
     # Verificación obligatoria (match por prefijo)
     verify = await ejecutar_js(cdp, f"""
@@ -712,17 +717,39 @@ async def fase_1(cdp: CDPSession, personalidad: Personalidad,
     selected_text = verify.get("value", "")
 
     if not selected_text.startswith(tramite_prefijo):
-        # Reintento: forzar selección por valor como fallback
-        log_info(f"Fase 1: verificación falló (seleccionado: '{selected_text[:50]}'), reintentando...")
-        valor_escaped = safe_js_string(valor_tramite)
-        await ejecutar_js(cdp, f"""
+        # Reintento via teclado: re-focus, navegar de nuevo y confirmar con Enter
+        log_info(f"Fase 1: verificación falló (seleccionado: '{selected_text[:50]}'), reintentando via teclado...")
+        await ejecutar_js(cdp, f"document.getElementById('{dropdown_id_js}').focus();")
+        await asyncio.sleep(0.2)
+
+        retry_result = await ejecutar_js(cdp, f"""
             (function() {{
                 var sel = document.getElementById('{dropdown_id_js}');
-                sel.value = '{valor_escaped}';
-                sel.dispatchEvent(new Event('change', {{bubbles: true}}));
-                sel.dispatchEvent(new Event('input', {{bubbles: true}}));
+                var opts = [];
+                for (var i = 0; i < sel.options.length; i++) {{
+                    opts.push({{index: i, text: sel.options[i].textContent.trim()}});
+                }}
+                return {{currentIndex: sel.selectedIndex, options: opts}};
             }})();
         """)
+        retry_data = retry_result.get("value", {})
+        retry_current = retry_data.get("currentIndex", 0)
+        retry_opts = retry_data.get("options", [])
+
+        retry_target = None
+        for opt in retry_opts:
+            if opt["text"].startswith(tramite_prefijo):
+                retry_target = opt["index"]
+                break
+
+        if retry_target is not None:
+            pasos = retry_target - retry_current
+            tecla_retry = "ArrowDown" if pasos > 0 else "ArrowUp"
+            for _ in range(abs(pasos)):
+                await _enviar_tecla(cdp, tecla_retry)
+                await asyncio.sleep(0.1)
+            await _enviar_tecla(cdp, "Enter")
+
         # Segunda verificación
         verify2 = await ejecutar_js(cdp, f"""
             (function() {{

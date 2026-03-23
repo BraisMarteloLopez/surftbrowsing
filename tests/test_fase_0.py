@@ -106,14 +106,6 @@ def _build_ejecutar_js_side_effect(verification_results=None):
                 return {"value": verification_results[idx]}
             return {"value": "Madrid"}
 
-        # Change/input dispatch
-        if "dispatchEvent" in expr and ("change" in expr or "input" in expr):
-            return {}
-
-        # Fallback set value (reintento)
-        if "sel.value" in expr:
-            return {}
-
         # WAF detection (body text)
         if "document.body.innerText" in expr:
             return {"value": "Sede Electrónica"}
@@ -202,9 +194,10 @@ class TestFase0PrimeraVez:
             await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
         send_calls = cdp.send.call_args_list
-        page_enable = [c for c in send_calls if c[0][0] == "Page.enable"]
         page_navigate = [c for c in send_calls if c[0][0] == "Page.navigate"]
-        assert len(page_enable) >= 1
+        # Page.enable is called once in conectar_navegador, not per-phase
+        page_enable = [c for c in send_calls if c[0][0] == "Page.enable"]
+        assert len(page_enable) == 0
         assert len(page_navigate) == 1
         assert page_navigate[0][0][1]["url"] == config["url_inicio"]
 
@@ -312,29 +305,32 @@ class TestFase0SeleccionMadrid:
                 await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
     @pytest.mark.asyncio
-    async def test_verificacion_fallida_reintenta_con_value(self):
-        """Si la verificación post-selección falla, usa .value como fallback."""
+    async def test_verificacion_fallida_reintenta_con_teclado(self):
+        """Si la verificación post-selección falla, reintenta via teclado."""
         cdp = _make_cdp_mock()
         personalidad = _make_personalidad_rapida()
         raton = EstadoRaton()
         config = _make_config()
 
-        js_expressions = []
+        teclas_enviadas = []
+        original_enviar = AsyncMock()
+
+        async def tracking_tecla(cdp, key):
+            teclas_enviadas.append(key)
 
         side_effect = _build_ejecutar_js_side_effect(
             verification_results=["Barcelona", "Madrid"]
         )
 
-        async def tracking_js(cdp, expression, timeout=5.0):
-            js_expressions.append(expression)
-            return await side_effect(cdp, expression, timeout)
-
-        with fase_0_patches(ejecutar_js={"side_effect": tracking_js}):
+        with fase_0_patches(
+            ejecutar_js={"side_effect": side_effect},
+            _enviar_tecla={"side_effect": tracking_tecla},
+        ):
             await fase_0(cdp, personalidad, raton, es_primera_vez=True, config=config)
 
-        all_js = "\n".join(js_expressions)
-        assert "sel.value =" in all_js, (
-            f"Expected fallback sel.value assignment. JS calls:\n{all_js[:500]}"
+        # Should have used keyboard (ArrowDown/ArrowUp + Enter) for retry
+        assert "Enter" in teclas_enviadas, (
+            f"Expected keyboard retry with Enter. Keys sent: {teclas_enviadas}"
         )
 
     @pytest.mark.asyncio
