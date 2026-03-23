@@ -285,16 +285,31 @@ class WafBanError(Exception):
 
 
 async def detectar_waf(cdp: CDPSession) -> bool:
-    """Detecta si la página actual es un bloqueo de WAF (F5 BIG-IP, etc.)."""
+    """Detecta si la página actual es un bloqueo WAF o rate limit (429)."""
     try:
-        result = await ejecutar_js(cdp, "document.body.innerText;")
-        texto = result.get("value", "")
-        if not texto:
-            return False
-        texto_lower = texto.lower()
-        return (
-            "the requested url was rejected" in texto_lower
-            and "your support id is" in texto_lower
+        result = await ejecutar_js(
+            cdp,
+            "({title: document.title, body: document.body.innerText});",
         )
+        obj = result.get("value", result)
+        if isinstance(obj, dict):
+            titulo = (obj.get("title") or "").lower()
+            texto_lower = (obj.get("body") or "").lower()
+        else:
+            titulo = ""
+            texto_lower = str(obj).lower()
+
+        # F5 BIG-IP WAF
+        if ("the requested url was rejected" in texto_lower
+                and "your support id is" in texto_lower):
+            return True
+
+        # HTTP 429 Too Many Requests
+        if "429" in titulo and "too many" in titulo:
+            return True
+        if "too many requests" in texto_lower:
+            return True
+
+        return False
     except Exception:
         return False

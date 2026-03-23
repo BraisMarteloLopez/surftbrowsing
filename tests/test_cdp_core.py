@@ -429,6 +429,34 @@ class TestDetectarWaf:
         }}})
         assert await detectar_waf(cdp) is True
 
+    @pytest.mark.asyncio
+    async def test_waf_detecta_429_por_titulo(self):
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={"result": {"result": {
+            "type": "object",
+            "value": {"title": "429 Too Many Requests",
+                      "body": "The user has sent too many requests in a given amount of time."}
+        }}})
+        assert await detectar_waf(cdp) is True
+
+    @pytest.mark.asyncio
+    async def test_waf_detecta_429_por_body(self):
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={"result": {"result": {
+            "type": "object",
+            "value": {"title": "Error", "body": "Too Many Requests"}
+        }}})
+        assert await detectar_waf(cdp) is True
+
+    @pytest.mark.asyncio
+    async def test_waf_429_string_fallback(self):
+        """429 en formato string (fallback sin objeto)."""
+        cdp = AsyncMock(spec=CDPSession)
+        cdp.send = AsyncMock(return_value={"result": {"result": {
+            "value": "Too Many Requests\nThe user has sent too many requests."
+        }}})
+        assert await detectar_waf(cdp) is True
+
 
 # =========================================================================
 # obtener_ws_url
