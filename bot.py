@@ -9,7 +9,7 @@ Uso:
 Requisitos:
     - Navegador con --remote-debugging-port=9222
     - pip install websockets python-dotenv
-    - Archivo .env con NIE y NOMBRE (ver .env.example)
+    - Archivo .env (ver .env.example)
 """
 
 import asyncio
@@ -37,8 +37,6 @@ load_dotenv()
 # Configuración
 # ---------------------------------------------------------------------------
 
-NIE = os.getenv("NIE", "").strip()
-NOMBRE = os.getenv("NOMBRE", "").strip()
 PASO_HASTA = int(os.getenv("PASO_HASTA", "5"))
 INTERVALO_REINTENTO = float(os.getenv("INTERVALO_REINTENTO_SEGUNDOS", "120"))
 
@@ -165,14 +163,6 @@ async def alerta_sonora() -> None:
 async def main() -> None:
     global _intento
 
-    # Validar configuración mínima
-    if not NIE:
-        print("ERROR: Falta la variable NIE en .env")
-        sys.exit(1)
-    if not NOMBRE:
-        print("ERROR: Falta la variable NOMBRE en .env")
-        sys.exit(1)
-
     # Cargar config.json
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
     try:
@@ -189,7 +179,6 @@ async def main() -> None:
         sys.exit(1)
 
     log_info(f"=== Bot v2 — Replicación de Comportamiento Humano ===")
-    log_info(f"NIE: {NIE[:3]}*** / Nombre: {NOMBRE.split()[0]}***")
     log_info(f"PASO_HASTA={PASO_HASTA}")
 
     # Conectar al navegador

@@ -1,6 +1,6 @@
 # AUTO WEBSURFT v2
 
-**Estado:** Fases 0-1 implementadas y testeadas. Fases 2-4 pendientes.
+**Estado:** Fases 0-3 implementadas y testeadas. Fase 4 pendiente.
 
 ---
 
@@ -11,8 +11,8 @@ Automatización del portal ICP via Chrome DevTools Protocol (CDP). Cada página 
 ```
 Fase 0 — Selección de provincia          [IMPLEMENTADA]
 Fase 1 — Selección de trámite            [IMPLEMENTADA]
-Fase 2 — Aviso informativo               [PENDIENTE]
-Fase 3 — Datos personales (NIE + nombre) [PENDIENTE]
+Fase 2 — Aviso informativo               [IMPLEMENTADA]
+Fase 3 — Datos personales (NIE + nombre) [IMPLEMENTADA]
 Fase 4 — Solicitud de cita + evaluación  [PENDIENTE]
 ```
 
@@ -23,7 +23,7 @@ Fase 4 — Solicitud de cita + evaluación  [PENDIENTE]
 ```
 surftbrowsing/
 ├── bot.py                    # Orquestador: ciclo principal, backoff, reconexión
-├── humano.py                 # Primitivas + fases (Personalidad, EstadoRaton, fase_0, fase_1)
+├── humano.py                 # Primitivas + fases (Personalidad, EstadoRaton, fase_0..fase_3)
 ├── cdp_core.py               # Capa CDP: CDPSession, ejecutar_js, esperar_elemento, detectar_waf, css_escape_id
 ├── config.json               # IDs de elementos HTML del portal
 ├── .env.example              # Plantilla con ~40 variables de timing configurables
@@ -39,6 +39,8 @@ surftbrowsing/
 │   ├── test_humano.py        # 24 tests — primitivas (ratón, click, tecla, scroll)
 │   ├── test_fase_0.py        # 31 tests — flujo completo fase 0, robustez, edge cases
 │   ├── test_fase_1.py        # 28 tests — flujo completo fase 1, prefijo, CSS escaping
+│   ├── test_fase_2.py        # 21 tests — flujo completo fase 2, scroll exhaustivo
+│   ├── test_fase_3.py        # 23 tests — flujo completo fase 3, autocomplete
 │   ├── test_bot.py           # 18 tests — BackoffController, jitter, limpieza caché
 │   ├── old_conftest.py       # [REF] Fixtures v1
 │   └── old_test_*.py         # [REF] Tests v1
@@ -77,6 +79,7 @@ Primitivas de bajo nivel + fases. Todos los tiempos vienen de `.env`.
 | `_scroll_exploratorio(cdp, raton, min, max)` | mouseWheel nativo en 2-3 pasos |
 | `_micro_movimiento(cdp, raton, ...)` | Movimiento idle del ratón |
 | `_movimientos_idle_durante_espera(cdp, raton, evento)` | Idle mientras espera carga |
+| `_rellenar_campo_autocomplete(cdp, pers, raton, sel, id, nombre)` | Click en input → ArrowDown → Enter (autocomplete del navegador) |
 
 **Clases:**
 
@@ -91,6 +94,8 @@ Primitivas de bajo nivel + fases. Todos los tiempos vienen de `.env`.
 |------|---------|-------|
 | 0 | `fase_0(cdp, pers, raton, primera_vez, config)` | Navegar → aterrizaje → abrir dropdown → buscar provincia (exact match) → seleccionar → click Aceptar → esperar carga |
 | 1 | `fase_1(cdp, pers, raton, config)` | Aterrizaje + scroll obligatorio → abrir dropdown trámite → buscar trámite (prefix match) → seleccionar → click Aceptar → esperar carga |
+| 2 | `fase_2(cdp, pers, raton, config)` | Aterrizaje → scroll exhaustivo hasta agotar contenido → focus + click "Entrar" → esperar carga |
+| 3 | `fase_3(cdp, pers, raton, config)` | Aterrizaje → autocomplete NIE (click → ArrowDown → Enter) → autocomplete Nombre → focus + click "Aceptar" → esperar carga |
 
 ### `bot.py`
 Orquestador principal. Ciclo infinito con personalidad nueva por iteración.
@@ -99,7 +104,7 @@ Orquestador principal. Ciclo infinito con personalidad nueva por iteración.
 |------------|-------------|
 | `BackoffController` | Backoff exponencial con umbral de alerta |
 | `limpiar_datos_navegador(cdp, origin)` | Limpia caché/storage sin tocar cookies |
-| `main()` | Ciclo: conectar → fase_0 → fase_1 → (fases pendientes) → limpiar → esperar |
+| `main()` | Ciclo: conectar → fase_0 → fase_1 → fase_2 → fase_3 → (fase 4 pendiente) → limpiar → esperar |
 
 ---
 
@@ -108,12 +113,8 @@ Orquestador principal. Ciclo infinito con personalidad nueva por iteración.
 ### `.env` (requerido)
 
 ```bash
-# Obligatorios
-NIE=Y1234567X
-NOMBRE=Juan García López
-
 # Depuración
-PASO_HASTA=1          # 0=solo fase 0, 1=hasta fase 1, 5=todas las fases
+PASO_HASTA=3          # 0=solo fase 0, 1=hasta fase 1, ..., 5=todas las fases
 
 # Timeouts
 TIMEOUT_CARGA_PAGINA_SEGUNDOS=15
@@ -164,16 +165,17 @@ Valores configurables en `config.json`:
 # 1. Instalar dependencias
 pip install -r requirements.txt
 
-# 2. Configurar .env
+# 2. Configurar .env (opcional — solo para ajustar timings)
 cp .env.example .env
-# Editar NIE y NOMBRE
 
-# 3. Abrir navegador con CDP
+# 3. Asegurar que el navegador tiene NIE y nombre guardados en autocomplete
+
+# 4. Abrir navegador con CDP
 brave --remote-debugging-port=9222
 
-# 4. Ejecutar
+# 5. Ejecutar
 PASO_HASTA=0 python bot.py   # solo fase 0
-PASO_HASTA=1 python bot.py   # fases 0+1
+PASO_HASTA=3 python bot.py   # fases 0-3
 ```
 
 ---
@@ -184,12 +186,14 @@ PASO_HASTA=1 python bot.py   # fases 0+1
 # Instalar deps de desarrollo
 pip install -r requirements-dev.txt
 
-# Ejecutar todos (148 tests)
+# Ejecutar todos (192 tests)
 python -m pytest tests/ -v
 
 # Solo una suite
 python -m pytest tests/test_fase_0.py -v    # 31 tests
 python -m pytest tests/test_fase_1.py -v    # 28 tests
+python -m pytest tests/test_fase_2.py -v    # 21 tests
+python -m pytest tests/test_fase_3.py -v    # 23 tests
 python -m pytest tests/test_humano.py -v    # 24 tests
 python -m pytest tests/test_cdp_core.py -v  # 47 tests
 python -m pytest tests/test_bot.py -v       # 18 tests
@@ -201,8 +205,8 @@ python -m pytest tests/test_bot.py -v       # 18 tests
 
 - [x] Fase 0 — Selección de provincia
 - [x] Fase 1 — Selección de trámite
-- [ ] Fase 2 — Aviso informativo (click "Entrar")
-- [ ] Fase 3 — Datos personales (NIE + nombre, escritura char-a-char)
+- [x] Fase 2 — Aviso informativo (scroll exhaustivo + click "Entrar")
+- [x] Fase 3 — Datos personales (NIE + nombre via autocomplete del navegador)
 - [ ] Fase 4 — Solicitar cita + evaluación de resultado
 - [ ] Pruebas manuales contra el portal real con `PASO_HASTA` progresivo
 
