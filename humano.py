@@ -99,6 +99,14 @@ F2_SCROLL_DIST_MAX = _env_int("F2_SCROLL_DIST_MAX", "250")
 F2_SCROLL_PAUSA_MIN = _env_float("F2_SCROLL_PAUSA_MIN", "0.5")
 F2_SCROLL_PAUSA_MAX = _env_float("F2_SCROLL_PAUSA_MAX", "1.5")
 
+# Fase 3 — Datos personales (autocomplete del navegador)
+F3_AUTOCOMPLETE_ESPERA_MIN = _env_float("F3_AUTOCOMPLETE_ESPERA_MIN", "0.4")
+F3_AUTOCOMPLETE_ESPERA_MAX = _env_float("F3_AUTOCOMPLETE_ESPERA_MAX", "0.9")
+F3_AUTOCOMPLETE_SELECCION_MIN = _env_float("F3_AUTOCOMPLETE_SELECCION_MIN", "0.2")
+F3_AUTOCOMPLETE_SELECCION_MAX = _env_float("F3_AUTOCOMPLETE_SELECCION_MAX", "0.5")
+F3_ENTRE_CAMPOS_MIN = _env_float("F3_ENTRE_CAMPOS_MIN", "0.6")
+F3_ENTRE_CAMPOS_MAX = _env_float("F3_ENTRE_CAMPOS_MAX", "1.5")
+
 # Personalidad
 PERSONALIDAD_FACTOR_RAPIDO = _env_float("PERSONALIDAD_FACTOR_RAPIDO", "0.6")
 PERSONALIDAD_FACTOR_NORMAL = _env_float("PERSONALIDAD_FACTOR_NORMAL", "1.0")
@@ -915,3 +923,163 @@ async def fase_2(cdp: CDPSession, personalidad: Personalidad,
         raise WafBanError("WAF detectado tras envío de Página 2")
 
     log_info("Fase 2: completada — Página 3 cargada")
+
+
+# ---------------------------------------------------------------------------
+# FASE 3 — Datos personales (NIE + nombre via autocomplete del navegador)
+# ---------------------------------------------------------------------------
+
+async def _rellenar_campo_autocomplete(cdp: CDPSession, personalidad: Personalidad,
+                                        raton: EstadoRaton, selector: str,
+                                        campo_id: str, nombre_campo: str) -> None:
+    """Rellena un campo de texto usando el autocomplete del navegador.
+
+    Simula el comportamiento humano: click en el input → esperar a que
+    aparezca el desplegable de autocomplete → ArrowDown → Enter.
+    """
+    # Mover al campo
+    pos = await _mover_a_elemento(cdp, raton, selector, personalidad)
+
+    # Click para dar focus y abrir autocomplete
+    await _click_nativo(cdp, pos["x"], pos["y"])
+
+    # Asegurar focus programáticamente
+    campo_id_js = safe_js_string(campo_id)
+    await ejecutar_js(cdp, f"document.getElementById('{campo_id_js}').focus();")
+
+    log_info(f"Fase 3: click en campo {nombre_campo}, esperando autocomplete...")
+
+    # Esperar a que aparezca el desplegable de autocomplete del navegador
+    await asyncio.sleep(personalidad.delay(F3_AUTOCOMPLETE_ESPERA_MIN,
+                                           F3_AUTOCOMPLETE_ESPERA_MAX))
+
+    # Seleccionar la primera (y única) sugerencia: ArrowDown + Enter
+    await _enviar_tecla(cdp, "ArrowDown")
+    await asyncio.sleep(personalidad.delay(F3_AUTOCOMPLETE_SELECCION_MIN,
+                                           F3_AUTOCOMPLETE_SELECCION_MAX))
+    await _enviar_tecla(cdp, "Enter")
+
+    # Verificar que el campo se rellenó
+    result = await ejecutar_js(cdp, f"""
+        (function() {{
+            var el = document.getElementById('{campo_id_js}');
+            return el ? el.value : '';
+        }})();
+    """)
+    valor = result.get("value", "")
+
+    if not valor:
+        log_info(f"Fase 3: AVISO — campo {nombre_campo} vacío tras autocomplete")
+        raise RuntimeError(
+            f"Campo '{nombre_campo}' vacío tras seleccionar autocomplete. "
+            f"Verificar que el navegador tiene datos guardados para este campo."
+        )
+
+    log_info(f"Fase 3: campo {nombre_campo} rellenado — '{valor[:20]}...'")
+
+
+async def fase_3(cdp: CDPSession, personalidad: Personalidad,
+                 raton: EstadoRaton, config: dict) -> None:
+    """Página 3: Rellenar NIE y nombre usando autocomplete del navegador.
+
+    No escribe char-a-char. El navegador tiene los datos guardados;
+    basta con click en el input → ArrowDown → Enter para seleccionar
+    la sugerencia del desplegable de autocomplete.
+    """
+    ids = config["ids"]
+
+    sel_nie = f"#{ids['input_nie']}"
+    sel_nombre = f"#{ids['input_nombre']}"
+    sel_boton = f"#{ids['boton_aceptar_f4']}"
+
+    # ── PASO 1: Espera de carga + seguridad ──────────────────────────────
+    await esperar_elemento(cdp, sel_nie)
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF detectado en Página 3")
+
+    log_info(f"Fase 3: página cargada, campo {sel_nie} encontrado")
+
+    # ── PASO 2: Aterrizaje ───────────────────────────────────────────────
+    await asyncio.sleep(personalidad.delay(ATERRIZAJE_PAUSA_MIN, ATERRIZAJE_PAUSA_MAX))
+
+    n_movimientos = random.randint(ATERRIZAJE_MICRO_MOV_MIN, ATERRIZAJE_MICRO_MOV_MAX)
+    for _ in range(n_movimientos):
+        await _micro_movimiento(cdp, raton,
+                                ATERRIZAJE_MOV_RANGO_X, ATERRIZAJE_MOV_RANGO_Y,
+                                ATERRIZAJE_MOV_DURACION_MIN, ATERRIZAJE_MOV_DURACION_MAX)
+        await asyncio.sleep(random.uniform(0.1, 0.3))
+
+    # ── PASO 3: Rellenar campo NIE (autocomplete) ────────────────────────
+    await asyncio.sleep(personalidad.delay(PRE_INTERACCION_PAUSA_MIN,
+                                           PRE_INTERACCION_PAUSA_MAX))
+
+    await _rellenar_campo_autocomplete(
+        cdp, personalidad, raton, sel_nie, ids["input_nie"], "NIE"
+    )
+
+    # ── PASO 4: Pausa entre campos ───────────────────────────────────────
+    await asyncio.sleep(personalidad.delay(F3_ENTRE_CAMPOS_MIN, F3_ENTRE_CAMPOS_MAX))
+
+    # ── PASO 5: Rellenar campo Nombre (autocomplete) ─────────────────────
+    await _rellenar_campo_autocomplete(
+        cdp, personalidad, raton, sel_nombre, ids["input_nombre"], "Nombre"
+    )
+
+    # ── PASO 6: Transición hacia el botón ────────────────────────────────
+    await asyncio.sleep(personalidad.delay(TRANSICION_PAUSA_MIN, TRANSICION_PAUSA_MAX))
+
+    if random.random() < TRANSICION_IDLE_PROB:
+        await _micro_movimiento(cdp, raton,
+                                TRANSICION_IDLE_RANGO, TRANSICION_IDLE_RANGO,
+                                0.15, 0.3)
+
+    # ── PASO 7: Focus + click en "Aceptar" ───────────────────────────────
+    pos_btn = await _mover_a_elemento(cdp, raton, sel_boton, personalidad)
+
+    # Re-verificar presencia del botón
+    await esperar_elemento(cdp, sel_boton)
+
+    # Focus explícito en el botón
+    boton_f3_id_js = safe_js_string(ids["boton_aceptar_f4"])
+    await ejecutar_js(cdp, f"document.getElementById('{boton_f3_id_js}').focus();")
+
+    # Pausa entre focus y click (0.35–0.65s)
+    await asyncio.sleep(personalidad.delay(FOCUS_CLICK_MIN, FOCUS_CLICK_MAX))
+
+    # Pre-registrar evento de carga ANTES del click
+    load_fut = cdp.pre_wait_event("Page.loadEventFired")
+
+    # Click nativo
+    await _click_nativo(cdp, pos_btn["x"], pos_btn["y"])
+    log_info("Fase 3: click en Aceptar, esperando carga de Página 4...")
+
+    # ── PASO 8: Espera de carga (transición a Página 4) ──────────────────
+    fin_carga = asyncio.Event()
+
+    tarea_idle = asyncio.create_task(
+        _movimientos_idle_durante_espera(cdp, raton, fin_carga)
+    )
+
+    try:
+        await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
+    except asyncio.TimeoutError:
+        fin_carga.set()
+        tarea_idle.cancel()
+        try:
+            await tarea_idle
+        except asyncio.CancelledError:
+            pass
+        raise TimeoutCargaPagina("Timeout esperando carga tras Aceptar en Página 3")
+    finally:
+        fin_carga.set()
+        tarea_idle.cancel()
+        try:
+            await tarea_idle
+        except asyncio.CancelledError:
+            pass
+
+    # Verificar WAF tras carga
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF detectado tras envío de Página 3")
+
+    log_info("Fase 3: completada — Página 4 cargada")
