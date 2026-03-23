@@ -1198,3 +1198,109 @@ async def fase_4(cdp: CDPSession, personalidad: Personalidad,
         raise WafBanError("WAF detectado tras envío de Página 4")
 
     log_info("Fase 4: completada — página de resultado cargada")
+
+
+# =========================================================================
+# Click en botón Salir/Aceptar (resultado sin citas)
+# =========================================================================
+
+async def click_salir_nocita(
+    cdp: CDPSession,
+    personalidad: Personalidad,
+    raton: EstadoRaton,
+) -> bool:
+    """Busca botón Salir/Aceptar por texto y hace focus+click nativo."""
+
+    # Buscar botón y obtener su bounding rect (sin hacer click)
+    js_buscar_boton = """
+        (function() {
+            var botones = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
+            var fallback = null;
+            for (var i = 0; i < botones.length; i++) {
+                var texto = (botones[i].value || botones[i].textContent || '').toLowerCase().trim();
+                if (texto === 'salir') {
+                    var r = botones[i].getBoundingClientRect();
+                    return {nombre: 'salir', x: r.x + r.width/2, y: r.y + r.height/2, width: r.width, height: r.height};
+                }
+                if (texto === 'aceptar' && !fallback) {
+                    fallback = botones[i];
+                }
+            }
+            if (fallback) {
+                var r = fallback.getBoundingClientRect();
+                return {nombre: 'aceptar', x: r.x + r.width/2, y: r.y + r.height/2, width: r.width, height: r.height};
+            }
+            return false;
+        })();
+    """
+    result = await ejecutar_js(cdp, js_buscar_boton)
+    boton = result.get("value", False)
+
+    if not boton:
+        log_info("ADVERTENCIA: Botón Salir/Aceptar no encontrado en la página")
+        return False
+
+    nombre = boton["nombre"]
+    bx, by = boton["x"], boton["y"]
+
+    # Mover ratón al botón
+    duracion = personalidad.delay(
+        MOUSE_TRAYECTORIA_DURACION_MIN, MOUSE_TRAYECTORIA_DURACION_MAX
+    )
+    await _mover_raton(cdp, raton, bx, by, duracion)
+
+    # Focus explícito via JS
+    js_focus = f"""
+        (function() {{
+            var botones = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
+            for (var i = 0; i < botones.length; i++) {{
+                var texto = (botones[i].value || botones[i].textContent || '').toLowerCase().trim();
+                if (texto === '{safe_js_string(nombre)}') {{
+                    botones[i].focus();
+                    return true;
+                }}
+            }}
+            return false;
+        }})();
+    """
+    await ejecutar_js(cdp, js_focus)
+
+    # Pausa entre focus y click (0.35–0.65s)
+    await asyncio.sleep(personalidad.delay(FOCUS_CLICK_MIN, FOCUS_CLICK_MAX))
+
+    # Pre-registrar evento de carga ANTES del click
+    load_fut = cdp.pre_wait_event("Page.loadEventFired")
+
+    # Click nativo
+    await _click_nativo(cdp, bx, by)
+    log_info(f"Click en botón '{nombre}' para volver al inicio")
+
+    # Espera de carga con idle
+    fin_carga = asyncio.Event()
+    tarea_idle = asyncio.create_task(
+        _movimientos_idle_durante_espera(cdp, raton, fin_carga)
+    )
+
+    try:
+        await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
+    except asyncio.TimeoutError:
+        fin_carga.set()
+        tarea_idle.cancel()
+        try:
+            await tarea_idle
+        except asyncio.CancelledError:
+            pass
+        log_info("Timeout esperando carga tras click Salir, continuando...")
+        return True
+    finally:
+        fin_carga.set()
+        tarea_idle.cancel()
+        try:
+            await tarea_idle
+        except asyncio.CancelledError:
+            pass
+
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF detectado tras click Salir")
+
+    return True

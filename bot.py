@@ -29,6 +29,7 @@ from cdp_core import (
 )
 from humano import (
     Personalidad, EstadoRaton, fase_0, fase_1, fase_2, fase_3, fase_4,
+    click_salir_nocita,
 )
 
 load_dotenv()
@@ -180,50 +181,6 @@ async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
         return EstadoPagina.DESCONOCIDO
 
     return EstadoPagina.HAY_CITAS
-
-
-async def click_salir_nocita(cdp: CDPSession) -> bool:
-    """Busca botón Salir/Aceptar y hace click para volver al inicio."""
-    js_buscar_boton = """
-        (function() {
-            var botones = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
-            var fallback = null;
-            for (var i = 0; i < botones.length; i++) {
-                var texto = (botones[i].value || botones[i].textContent || '').toLowerCase().trim();
-                if (texto === 'salir') {
-                    botones[i].click();
-                    return 'salir';
-                }
-                if (texto === 'aceptar' && !fallback) {
-                    fallback = botones[i];
-                }
-            }
-            if (fallback) {
-                fallback.click();
-                return 'aceptar';
-            }
-            return false;
-        })();
-    """
-    load_fut = cdp.pre_wait_event("Page.loadEventFired")
-    result = await ejecutar_js(cdp, js_buscar_boton)
-    clicked = result.get("value", False)
-
-    if not clicked:
-        log("ADVERTENCIA: Botón Salir/Aceptar no encontrado en la página")
-        return False
-
-    log(f"Click en botón '{clicked}' para volver al inicio")
-
-    try:
-        await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
-    except asyncio.TimeoutError:
-        log("Timeout esperando carga tras click Salir, continuando...")
-
-    if await detectar_waf(cdp):
-        raise WafBanError("WAF detectado tras click Salir")
-
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +335,7 @@ async def main() -> None:
 
             if estado == EstadoPagina.NO_HAY_CITAS:
                 log("No hay citas disponibles. Volviendo al inicio...")
-                volvio = await click_salir_nocita(cdp)
+                volvio = await click_salir_nocita(cdp, personalidad, raton)
                 es_primera_vez = not volvio
             else:
                 log("Estado desconocido. Reiniciando desde cero...")
