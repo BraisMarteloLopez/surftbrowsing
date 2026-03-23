@@ -28,7 +28,7 @@ from cdp_core import (
     TIMEOUT_PAGINA, TIMEOUT_JS,
 )
 from humano import (
-    Personalidad, EstadoRaton, fase_0, fase_1,
+    Personalidad, EstadoRaton, fase_0, fase_1, fase_2,
 )
 
 load_dotenv()
@@ -243,8 +243,16 @@ async def main() -> None:
                 log_info("Modo depuración finalizado.")
                 return
 
-            # ── FASES 2-4: TODO (no implementadas aún) ───────────────────
-            log("Fases 0-1 completadas. Fases 2-4 pendientes de implementación.")
+            # ── FASE 2: Aviso informativo ──────────────────────────────────
+            await fase_2(cdp, personalidad, raton, config)
+
+            if PASO_HASTA == 2:
+                log("Detenido en PASO_HASTA=2 — hasta Fase 2")
+                log_info("Modo depuración finalizado.")
+                return
+
+            # ── FASES 3-4: TODO (no implementadas aún) ───────────────────
+            log("Fases 0-2 completadas. Fases 3-4 pendientes de implementación.")
             log("Simulando resultado: NO_HAY_CITAS → volviendo al inicio")
 
             # Click en "Salir"/"Aceptar" para volver al inicio (reutilizar lógica v1)

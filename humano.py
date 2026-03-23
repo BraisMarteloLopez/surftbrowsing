@@ -93,6 +93,14 @@ ENVIO_HESITACION_MAX = _env_float("ENVIO_HESITACION_MAX", "0.8")
 F1_SCROLL_INICIAL_DIST_MIN = _env_int("F1_SCROLL_INICIAL_DIST_MIN", "80")
 F1_SCROLL_INICIAL_DIST_MAX = _env_int("F1_SCROLL_INICIAL_DIST_MAX", "200")
 
+# Fase 2 — Scroll exhaustivo + botón Entrar
+F2_SCROLL_DIST_MIN = _env_int("F2_SCROLL_DIST_MIN", "100")
+F2_SCROLL_DIST_MAX = _env_int("F2_SCROLL_DIST_MAX", "250")
+F2_SCROLL_PAUSA_MIN = _env_float("F2_SCROLL_PAUSA_MIN", "0.5")
+F2_SCROLL_PAUSA_MAX = _env_float("F2_SCROLL_PAUSA_MAX", "1.5")
+F2_FOCUS_CLICK_MIN = _env_float("F2_FOCUS_CLICK_MIN", "0.35")
+F2_FOCUS_CLICK_MAX = _env_float("F2_FOCUS_CLICK_MAX", "0.65")
+
 # Personalidad
 PERSONALIDAD_FACTOR_RAPIDO = _env_float("PERSONALIDAD_FACTOR_RAPIDO", "0.6")
 PERSONALIDAD_FACTOR_NORMAL = _env_float("PERSONALIDAD_FACTOR_NORMAL", "1.0")
@@ -778,3 +786,126 @@ async def fase_1(cdp: CDPSession, personalidad: Personalidad,
         raise WafBanError("WAF detectado tras envío de Página 1")
 
     log_info("Fase 1: completada — Página 2 cargada")
+
+
+# ---------------------------------------------------------------------------
+# FASE 2 — Aviso informativo (scroll exhaustivo + click "Entrar")
+# ---------------------------------------------------------------------------
+
+async def fase_2(cdp: CDPSession, personalidad: Personalidad,
+                 raton: EstadoRaton, config: dict) -> None:
+    """Página 2: Leer aviso informativo (scroll hasta abajo) y pulsar Entrar.
+
+    La página es informativa y larga. Un humano haría scroll varias veces
+    hasta agotar el contenido antes de pulsar "Entrar".
+    """
+    ids = config["ids"]
+    sel_boton = f"#{ids['boton_entrar_f3']}"
+
+    # ── PASO 1: Espera de carga + seguridad ──────────────────────────────
+    await esperar_elemento(cdp, sel_boton)
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF detectado en Página 2")
+
+    log_info(f"Fase 2: página cargada, botón {sel_boton} encontrado")
+
+    # ── PASO 2: Aterrizaje ───────────────────────────────────────────────
+    await asyncio.sleep(personalidad.delay(ATERRIZAJE_PAUSA_MIN, ATERRIZAJE_PAUSA_MAX))
+
+    n_movimientos = random.randint(ATERRIZAJE_MICRO_MOV_MIN, ATERRIZAJE_MICRO_MOV_MAX)
+    for _ in range(n_movimientos):
+        await _micro_movimiento(cdp, raton,
+                                ATERRIZAJE_MOV_RANGO_X, ATERRIZAJE_MOV_RANGO_Y,
+                                ATERRIZAJE_MOV_DURACION_MIN, ATERRIZAJE_MOV_DURACION_MAX)
+        await asyncio.sleep(random.uniform(0.1, 0.3))
+
+    # ── PASO 3: Scroll exhaustivo hasta agotar el contenido ──────────────
+    log_info("Fase 2: iniciando scroll exhaustivo de la página informativa")
+
+    while True:
+        # Comprobar si queda scroll por hacer
+        scroll_info = await ejecutar_js(cdp, """
+            (function() {
+                var st = window.pageYOffset || document.documentElement.scrollTop;
+                var ch = document.documentElement.clientHeight;
+                var sh = document.documentElement.scrollHeight;
+                return {scrollTop: st, clientHeight: ch, scrollHeight: sh};
+            })();
+        """)
+        info = scroll_info.get("value", {})
+        scroll_top = info.get("scrollTop", 0)
+        client_height = info.get("clientHeight", 0)
+        scroll_height = info.get("scrollHeight", 0)
+
+        # Si ya estamos al final (o casi), parar
+        if scroll_top + client_height >= scroll_height - 5:
+            break
+
+        # Scroll hacia abajo
+        await _scroll_exploratorio(cdp, raton,
+                                   F2_SCROLL_DIST_MIN,
+                                   F2_SCROLL_DIST_MAX)
+
+        # Pausa de lectura entre scrolls
+        await asyncio.sleep(personalidad.delay(F2_SCROLL_PAUSA_MIN, F2_SCROLL_PAUSA_MAX))
+
+    log_info("Fase 2: scroll completado — final de página alcanzado")
+
+    # ── PASO 4: Transición hacia el botón ────────────────────────────────
+    await asyncio.sleep(personalidad.delay(TRANSICION_PAUSA_MIN, TRANSICION_PAUSA_MAX))
+
+    if random.random() < TRANSICION_IDLE_PROB:
+        await _micro_movimiento(cdp, raton,
+                                TRANSICION_IDLE_RANGO, TRANSICION_IDLE_RANGO,
+                                0.15, 0.3)
+
+    # ── PASO 5: Focus + click en "Entrar" ────────────────────────────────
+    pos_btn = await _mover_a_elemento(cdp, raton, sel_boton, personalidad)
+
+    # Re-verificar presencia del botón
+    await esperar_elemento(cdp, sel_boton)
+
+    # Focus explícito en el botón
+    boton_id_js = safe_js_string(ids["boton_entrar_f3"])
+    await ejecutar_js(cdp, f"document.getElementById('{boton_id_js}').focus();")
+
+    # Pausa entre focus y click (0.35–0.65s según spec)
+    await asyncio.sleep(personalidad.delay(F2_FOCUS_CLICK_MIN, F2_FOCUS_CLICK_MAX))
+
+    # Pre-registrar evento de carga ANTES del click
+    load_fut = cdp.pre_wait_event("Page.loadEventFired")
+
+    # Click nativo
+    await _click_nativo(cdp, pos_btn["x"], pos_btn["y"])
+    log_info("Fase 2: click en Entrar, esperando carga de Página 3...")
+
+    # ── PASO 6: Espera de carga (transición a Página 3) ──────────────────
+    fin_carga = asyncio.Event()
+
+    tarea_idle = asyncio.create_task(
+        _movimientos_idle_durante_espera(cdp, raton, fin_carga)
+    )
+
+    try:
+        await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
+    except asyncio.TimeoutError:
+        fin_carga.set()
+        tarea_idle.cancel()
+        try:
+            await tarea_idle
+        except asyncio.CancelledError:
+            pass
+        raise TimeoutCargaPagina("Timeout esperando carga tras Entrar en Página 2")
+    finally:
+        fin_carga.set()
+        tarea_idle.cancel()
+        try:
+            await tarea_idle
+        except asyncio.CancelledError:
+            pass
+
+    # Verificar WAF tras carga
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF detectado tras envío de Página 2")
+
+    log_info("Fase 2: completada — Página 3 cargada")
