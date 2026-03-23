@@ -85,9 +85,9 @@ TRANSICION_EXTRA_PROB = _env_float("TRANSICION_EXTRA_PROB", "0.20")
 TRANSICION_EXTRA_MIN = _env_float("TRANSICION_EXTRA_MIN", "0.5")
 TRANSICION_EXTRA_MAX = _env_float("TRANSICION_EXTRA_MAX", "2.0")
 
-# Envío
-ENVIO_HESITACION_MIN = _env_float("ENVIO_HESITACION_MIN", "0.3")
-ENVIO_HESITACION_MAX = _env_float("ENVIO_HESITACION_MAX", "0.8")
+# Focus → Click (intervalo entre focus y click en botones de envío)
+FOCUS_CLICK_MIN = _env_float("FOCUS_CLICK_MIN", "0.35")
+FOCUS_CLICK_MAX = _env_float("FOCUS_CLICK_MAX", "0.65")
 
 # Fase 1 — Scroll inicial obligatorio
 F1_SCROLL_INICIAL_DIST_MIN = _env_int("F1_SCROLL_INICIAL_DIST_MIN", "80")
@@ -98,8 +98,6 @@ F2_SCROLL_DIST_MIN = _env_int("F2_SCROLL_DIST_MIN", "100")
 F2_SCROLL_DIST_MAX = _env_int("F2_SCROLL_DIST_MAX", "250")
 F2_SCROLL_PAUSA_MIN = _env_float("F2_SCROLL_PAUSA_MIN", "0.5")
 F2_SCROLL_PAUSA_MAX = _env_float("F2_SCROLL_PAUSA_MAX", "1.5")
-F2_FOCUS_CLICK_MIN = _env_float("F2_FOCUS_CLICK_MIN", "0.35")
-F2_FOCUS_CLICK_MAX = _env_float("F2_FOCUS_CLICK_MAX", "0.65")
 
 # Personalidad
 PERSONALIDAD_FACTOR_RAPIDO = _env_float("PERSONALIDAD_FACTOR_RAPIDO", "0.6")
@@ -512,14 +510,18 @@ async def fase_0(cdp: CDPSession, personalidad: Personalidad,
         await asyncio.sleep(personalidad.delay(TRANSICION_EXTRA_MIN,
                                                TRANSICION_EXTRA_MAX))
 
-    # ── PASO 6: Envío (click en "Aceptar") ───────────────────────────────
+    # ── PASO 6: Envío (focus + click en "Aceptar") ──────────────────────
     pos_btn = await _mover_a_elemento(cdp, raton, sel_boton, personalidad)
 
     # Re-verificar presencia del botón
     await esperar_elemento(cdp, sel_boton)
 
-    # Hesitación pre-click
-    await asyncio.sleep(personalidad.delay(ENVIO_HESITACION_MIN, ENVIO_HESITACION_MAX))
+    # Focus explícito en el botón
+    boton_f0_id_js = safe_js_string(ids["boton_aceptar_f1"])
+    await ejecutar_js(cdp, f"document.getElementById('{boton_f0_id_js}').focus();")
+
+    # Pausa entre focus y click (0.35–0.65s)
+    await asyncio.sleep(personalidad.delay(FOCUS_CLICK_MIN, FOCUS_CLICK_MAX))
 
     # Pre-registrar evento de carga ANTES del click
     load_fut = cdp.pre_wait_event("Page.loadEventFired")
@@ -740,14 +742,18 @@ async def fase_1(cdp: CDPSession, personalidad: Personalidad,
         await asyncio.sleep(personalidad.delay(TRANSICION_EXTRA_MIN,
                                                TRANSICION_EXTRA_MAX))
 
-    # ── PASO 6: Envío (click en "Aceptar") ───────────────────────────────
+    # ── PASO 6: Envío (focus + click en "Aceptar") ──────────────────────
     pos_btn = await _mover_a_elemento(cdp, raton, sel_boton, personalidad)
 
     # Re-verificar presencia del botón
     await esperar_elemento(cdp, sel_boton)
 
-    # Hesitación pre-click
-    await asyncio.sleep(personalidad.delay(ENVIO_HESITACION_MIN, ENVIO_HESITACION_MAX))
+    # Focus explícito en el botón
+    boton_f1_id_js = safe_js_string(ids["boton_aceptar_f2"])
+    await ejecutar_js(cdp, f"document.getElementById('{boton_f1_id_js}').focus();")
+
+    # Pausa entre focus y click (0.35–0.65s)
+    await asyncio.sleep(personalidad.delay(FOCUS_CLICK_MIN, FOCUS_CLICK_MAX))
 
     # Pre-registrar evento de carga ANTES del click
     load_fut = cdp.pre_wait_event("Page.loadEventFired")
@@ -869,8 +875,8 @@ async def fase_2(cdp: CDPSession, personalidad: Personalidad,
     boton_id_js = safe_js_string(ids["boton_entrar_f3"])
     await ejecutar_js(cdp, f"document.getElementById('{boton_id_js}').focus();")
 
-    # Pausa entre focus y click (0.35–0.65s según spec)
-    await asyncio.sleep(personalidad.delay(F2_FOCUS_CLICK_MIN, F2_FOCUS_CLICK_MAX))
+    # Pausa entre focus y click (0.35–0.65s)
+    await asyncio.sleep(personalidad.delay(FOCUS_CLICK_MIN, FOCUS_CLICK_MAX))
 
     # Pre-registrar evento de carga ANTES del click
     load_fut = cdp.pre_wait_event("Page.loadEventFired")
