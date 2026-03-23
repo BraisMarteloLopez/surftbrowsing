@@ -24,30 +24,23 @@ Evaluación — Detectar citas disponibles  [IMPLEMENTADA]
 ```
 surftbrowsing/
 ├── bot.py                    # Orquestador: ciclo principal, backoff, reconexión
-├── humano.py                 # Primitivas + fases (Personalidad, EstadoRaton, fase_0..fase_3)
+├── humano.py                 # Primitivas + fases (Personalidad, EstadoRaton, fase_0..fase_4, click_salir_nocita)
 ├── cdp_core.py               # Capa CDP: CDPSession, ejecutar_js, esperar_elemento, detectar_waf, css_escape_id
 ├── config.json               # IDs de elementos HTML del portal
 ├── .env.example              # Plantilla con ~40 variables de timing configurables
 ├── .env                      # Config personal (no se sube al repo)
 ├── requirements.txt          # websockets, python-dotenv
 ├── requirements-dev.txt      # pytest, pytest-asyncio
-├── specs/
-│   ├── pagina_0_seleccion_sede.md  # Spec detallada de fase 0
-│   └── pagina_1_seleccion_tramite.md  # Spec detallada de fase 1
-├── tests/
-│   ├── conftest.py           # MockWebSocket, fixtures compartidas
-│   ├── test_cdp_core.py      # 47 tests — CDPSession, ejecutar_js, esperar_elemento, WAF, css_escape_id
-│   ├── test_humano.py        # 24 tests — primitivas (ratón, click, tecla, scroll)
-│   ├── test_fase_0.py        # 31 tests — flujo completo fase 0, robustez, edge cases
-│   ├── test_fase_1.py        # 28 tests — flujo completo fase 1, prefijo, CSS escaping
-│   ├── test_fase_2.py        # 21 tests — flujo completo fase 2, scroll exhaustivo
-│   ├── test_fase_3.py        # 23 tests — flujo completo fase 3, autocomplete
-│   ├── test_fase_4.py        # 13 tests — flujo completo fase 4, solicitar cita
-│   ├── test_bot.py           # 18 tests — BackoffController, jitter, limpieza caché
-│   ├── old_conftest.py       # [REF] Fixtures v1
-│   └── old_test_*.py         # [REF] Tests v1
-├── old_*.py / old_*.json     # [REF] Código v1 funcional (no borrar hasta v2 validada)
-└── old_README.md             # [REF] Documentación v1
+└── tests/
+    ├── conftest.py           # MockWebSocket, fixtures compartidas
+    ├── test_cdp_core.py      # 47 tests — CDPSession, ejecutar_js, esperar_elemento, WAF, css_escape_id
+    ├── test_humano.py        # 24 tests — primitivas (ratón, click, tecla, scroll)
+    ├── test_fase_0.py        # 31 tests — flujo completo fase 0, robustez, edge cases
+    ├── test_fase_1.py        # 28 tests — flujo completo fase 1, prefijo, CSS escaping
+    ├── test_fase_2.py        # 21 tests — flujo completo fase 2, scroll exhaustivo
+    ├── test_fase_3.py        # 23 tests — flujo completo fase 3, autocomplete
+    ├── test_fase_4.py        # 13 tests — flujo completo fase 4, solicitar cita
+    └── test_bot.py           # 18 tests — BackoffController, jitter, limpieza caché
 ```
 
 ---
@@ -108,7 +101,7 @@ Orquestador principal. Ciclo infinito con personalidad nueva por iteración.
 | `BackoffController` | Backoff exponencial con umbral de alerta |
 | `limpiar_datos_navegador(cdp, origin)` | Limpia caché/storage sin tocar cookies |
 | `evaluar_estado_pagina(cdp, ids)` | Multi-señal: contenido mínimo → texto "no hay citas" → URL válida → texto positivo |
-| `click_salir_nocita(cdp)` | Busca botón Salir/Aceptar y hace click para volver al inicio |
+| `click_salir_nocita(cdp, pers, raton)` | *(en humano.py)* Busca botón Salir/Aceptar con focus+click nativo |
 | `alerta_sonora()` | Emite alerta sonora en bucle cuando hay citas |
 | `main()` | Ciclo: conectar → fases 0-4 → evaluar → alertar/reintentar → limpiar → esperar |
 
@@ -209,28 +202,3 @@ python -m pytest tests/test_cdp_core.py -v  # 47 tests
 python -m pytest tests/test_bot.py -v       # 18 tests
 ```
 
----
-
-## Pendiente
-
-- [x] Fase 0 — Selección de provincia
-- [x] Fase 1 — Selección de trámite
-- [x] Fase 2 — Aviso informativo (scroll exhaustivo + click "Entrar")
-- [x] Fase 3 — Datos personales (NIE + nombre via autocomplete del navegador)
-- [x] Fase 4 — Solicitar cita (focus + click)
-- [x] Evaluación de resultado (detectar "no hay citas", alertar si hay citas, reintentar)
-- [ ] Pruebas manuales contra el portal real con `PASO_HASTA` progresivo
-
----
-
-## Archivos de Referencia (old_*)
-
-Código v1 funcional. No borrar hasta que v2 esté validada en producción.
-
-| Archivo | Referencia para |
-|---------|----------------|
-| `old_cdp_helpers.py` | CDPSession, ejecutar_js, safe_js_string |
-| `old_cita_bot.py` | BackoffController, evaluar_estado_pagina |
-| `old_comportamiento_humano.py` | SimuladorHumano, detectar_waf, limpiar_datos_navegador |
-| `old_config.json` | IDs verificados |
-| `old_README.md` | Documentación completa del flujo del portal |
