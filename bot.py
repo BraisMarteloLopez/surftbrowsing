@@ -1,7 +1,6 @@
 """Bot v2 — Orquestador de fases con personalidades.
 
 Ejecuta las fases del formulario ICP replicando comportamiento humano.
-Actualmente implementa solo la Fase 0 (selección de sede).
 
 Uso:
     python bot.py
@@ -17,6 +16,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from enum import Enum
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 from cdp_core import (
     CDPSession, ejecutar_js, obtener_ws_url, esperar_elemento,
     WafBanError, ElementoNoEncontrado, TimeoutCargaPagina,
-    detectar_waf, log_info,
+    detectar_waf, safe_js_string, log_info,
     TIMEOUT_PAGINA, TIMEOUT_JS,
 )
 from humano import (
@@ -40,10 +40,24 @@ load_dotenv()
 PASO_HASTA = int(os.getenv("PASO_HASTA", "5"))
 INTERVALO_REINTENTO = float(os.getenv("INTERVALO_REINTENTO_SEGUNDOS", "120"))
 
+# Evaluación resultado
+DELAY_EVALUACION_MIN = float(os.getenv("DELAY_EVALUACION_MIN", "2.0"))
+DELAY_EVALUACION_MAX = float(os.getenv("DELAY_EVALUACION_MAX", "5.0"))
+
 # WAF backoff
 WAF_BACKOFF_BASE = float(os.getenv("WAF_BACKOFF_BASE_SEGUNDOS", "300"))
 WAF_BACKOFF_MAX = float(os.getenv("WAF_BACKOFF_MAX_SEGUNDOS", "900"))
 WAF_BACKOFF_UMBRAL_ALERTA = int(os.getenv("WAF_BACKOFF_UMBRAL_ALERTA", "3"))
+
+
+# ---------------------------------------------------------------------------
+# Estado de resultado
+# ---------------------------------------------------------------------------
+
+class EstadoPagina(Enum):
+    NO_HAY_CITAS = "no_hay_citas"
+    HAY_CITAS = "hay_citas"
+    DESCONOCIDO = "desconocido"
 
 # ---------------------------------------------------------------------------
 # Utilidades (reutilizadas de v1)
@@ -117,6 +131,99 @@ async def limpiar_datos_navegador(cdp: CDPSession, origin: str) -> None:
         await cdp.send("Network.clearBrowserCache", timeout=TIMEOUT_JS)
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Evaluación de resultado (reutilizada de v1)
+# ---------------------------------------------------------------------------
+
+async def evaluar_estado_pagina(cdp: CDPSession, ids: dict) -> EstadoPagina:
+    """Evalúa la página tras solicitar cita.
+
+    Multi-señal: contenido mínimo → texto "no hay citas" → URL válida →
+    texto positivo opcional.
+    """
+    await asyncio.sleep(random.uniform(DELAY_EVALUACION_MIN, DELAY_EVALUACION_MAX))
+
+    # Contenido mínimo
+    body_length = await ejecutar_js(cdp, "document.body.innerText.length;")
+    if body_length.get("value", 0) < 50:
+        log("Estado: página con contenido insuficiente (<50 chars)")
+        return EstadoPagina.DESCONOCIDO
+
+    # Texto "no hay citas"
+    texto_buscar = safe_js_string(ids["texto_no_hay_citas"].lower())
+    texto_check = await ejecutar_js(cdp, f"""
+        document.body.innerText.toLowerCase().includes('{texto_buscar}');
+    """)
+    if texto_check.get("value", False):
+        return EstadoPagina.NO_HAY_CITAS
+
+    # URL coherente con el portal
+    url_check = await ejecutar_js(cdp, "window.location.href;")
+    current_url = url_check.get("value", "")
+    if "icpplus" not in current_url and "icpplustiem" not in current_url:
+        log(f"Estado: URL inesperada: {current_url}")
+        return EstadoPagina.DESCONOCIDO
+
+    # Verificación positiva opcional
+    texto_positivo = ids.get("texto_hay_citas", "")
+    if texto_positivo:
+        texto_pos_buscar = safe_js_string(texto_positivo.lower())
+        positivo_check = await ejecutar_js(cdp, f"""
+            document.body.innerText.toLowerCase().includes('{texto_pos_buscar}');
+        """)
+        if positivo_check.get("value", False):
+            log("Confirmación positiva: texto de cita disponible encontrado")
+            return EstadoPagina.HAY_CITAS
+        log("Estado: no se encontró texto negativo NI positivo")
+        return EstadoPagina.DESCONOCIDO
+
+    return EstadoPagina.HAY_CITAS
+
+
+async def click_salir_nocita(cdp: CDPSession) -> bool:
+    """Busca botón Salir/Aceptar y hace click para volver al inicio."""
+    js_buscar_boton = """
+        (function() {
+            var botones = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
+            var fallback = null;
+            for (var i = 0; i < botones.length; i++) {
+                var texto = (botones[i].value || botones[i].textContent || '').toLowerCase().trim();
+                if (texto === 'salir') {
+                    botones[i].click();
+                    return 'salir';
+                }
+                if (texto === 'aceptar' && !fallback) {
+                    fallback = botones[i];
+                }
+            }
+            if (fallback) {
+                fallback.click();
+                return 'aceptar';
+            }
+            return false;
+        })();
+    """
+    load_fut = cdp.pre_wait_event("Page.loadEventFired")
+    result = await ejecutar_js(cdp, js_buscar_boton)
+    clicked = result.get("value", False)
+
+    if not clicked:
+        log("ADVERTENCIA: Botón Salir/Aceptar no encontrado en la página")
+        return False
+
+    log(f"Click en botón '{clicked}' para volver al inicio")
+
+    try:
+        await cdp.wait_future(load_fut, timeout=TIMEOUT_PAGINA)
+    except asyncio.TimeoutError:
+        log("Timeout esperando carga tras click Salir, continuando...")
+
+    if await detectar_waf(cdp):
+        raise WafBanError("WAF detectado tras click Salir")
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -256,15 +363,26 @@ async def main() -> None:
                 log_info("Modo depuración finalizado.")
                 return
 
-            # ── Ciclo completado — evaluar resultado ──────────────────────
-            log("Fases 0-4 completadas.")
+            # ── Evaluación de resultado ────────────────────────────────────
+            log("Fases 0-4 completadas. Evaluando resultado...")
 
-            # Click en "Salir"/"Aceptar" para volver al inicio (reutilizar lógica v1)
-            # Por ahora, navegamos de nuevo
-            es_primera_vez = True
+            estado = await evaluar_estado_pagina(cdp, config["ids"])
+
+            if estado == EstadoPagina.HAY_CITAS:
+                log("*** HAY CITAS DISPONIBLES ***")
+                await alerta_sonora()
+                return  # El usuario toma el control
 
             backoff.registrar_exito()
             waf_backoff.registrar_exito()
+
+            if estado == EstadoPagina.NO_HAY_CITAS:
+                log("No hay citas disponibles. Volviendo al inicio...")
+                volvio = await click_salir_nocita(cdp)
+                es_primera_vez = not volvio
+            else:
+                log("Estado desconocido. Reiniciando desde cero...")
+                es_primera_vez = True
 
             # Limpiar caché entre ciclos
             await limpiar_datos_navegador(cdp, url_inicio)
